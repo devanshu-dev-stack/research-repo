@@ -1,0 +1,24 @@
+# Web (Next.js). Multi-stage: install → build → run.
+FROM node:20-slim AS base
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+RUN corepack enable
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json ./
+COPY packages ./packages
+COPY apps/web/package.json ./apps/web/package.json
+COPY workers/package.json ./workers/package.json
+RUN pnpm install --frozen-lockfile || pnpm install
+
+FROM deps AS build
+COPY . .
+RUN pnpm --filter @research-repo/db generate
+RUN pnpm --filter @research-repo/web build
+
+FROM base AS run
+ENV NODE_ENV=production
+COPY --from=build /app ./
+EXPOSE 3000
+# Run pending migrations + seed on boot, then start. Idempotent.
+CMD sh -c "pnpm --filter @research-repo/db migrate:deploy && pnpm --filter @research-repo/db seed || true; pnpm --filter @research-repo/web start"

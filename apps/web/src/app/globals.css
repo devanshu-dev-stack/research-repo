@@ -1,0 +1,35 @@
+@font-face { font-family: "Copernicus"; src: local("Copernicus"); }
+
+:root {
+  --navy: #002341;
+  --blue: #0382ED;
+  --cream: #FCF8EC;
+  --lilac: #DCA2FD;
+  --orange: #FF6713;
+  --pink: #FFC9D7;
+  --sky: #79D6F9;
+  --ink: #0a0a0a;
+  --line: #e4dfce;
+  --muted: #7c7766;
+  --serif: "Copernicus", Georgia, serif;
+  --sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --hand: "DK Formosa", cursive;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { font-family: var(--serif); letter-spacing: -0.02em; }
+
+button { font-family: var(--sans); cursor: pointer; }
+
+input, select {
+  font-family: var(--sans);
+  font-size: 14px;
+}

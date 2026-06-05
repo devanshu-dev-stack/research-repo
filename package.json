@@ -1,0 +1,20 @@
+{
+  "name": "research-repo",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev --parallel",
+    "typecheck": "turbo typecheck",
+    "db:generate": "pnpm --filter @research-repo/db generate",
+    "db:migrate": "pnpm --filter @research-repo/db migrate:deploy",
+    "db:seed": "pnpm --filter @research-repo/db seed",
+    "worker": "pnpm --filter @research-repo/workers start"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": { "node": ">=20" }
+}
