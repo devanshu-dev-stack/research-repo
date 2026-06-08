@@ -257,6 +257,7 @@ model Insight {
   summary   String?
   severity  Int?
   frequency Int         @default(1)
+  archived  Boolean     @default(false)
   clusterId String?     @map("cluster_id") @db.Uuid
 
   embedding Unsupported("vector(3072)")?

@@ -14,6 +14,7 @@ export const insightsRouter = router({
         kind: z.string().optional(),
         stageId: z.string().uuid().optional(),
         meetingId: z.string().uuid().optional(),
+        includeArchived: z.boolean().default(false),
         limit: z.number().int().min(1).max(200).default(100),
       }),
     )
@@ -22,6 +23,7 @@ export const insightsRouter = router({
         where: {
           projectId: input.projectId,
           kind: input.kind ? (input.kind as any) : undefined,
+          archived: input.includeArchived ? undefined : false,
           flowTags: input.stageId ? { some: { stageId: input.stageId } } : undefined,
           evidence: input.meetingId
             ? { some: { chunk: { source: { meetingId: input.meetingId } } } }
@@ -69,12 +71,71 @@ export const insightsRouter = router({
           summary: i.summary,
           severity: i.severity,
           frequency: i.frequency,
+          archived: i.archived,
           stages: i.flowTags.map((t) => t.stage).filter(Boolean),
           evidence,
           sources: [...sources.values()],
           meetings: [...meetings.values()],
         };
       });
+    }),
+
+  // Full detail for one insight: every evidence quote with its timestamp
+  // (when said, for audio/video) or page, plus source and stages.
+  get: publicProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .query(async ({ input }) => {
+      const i = await prisma.insight.findUniqueOrThrow({
+        where: { id: input.id },
+        include: {
+          evidence: {
+            include: {
+              chunk: {
+                select: {
+                  startMs: true,
+                  endMs: true,
+                  page: true,
+                  ordinal: true,
+                  source: { select: { id: true, originalName: true, topic: true, sourceType: true } },
+                },
+              },
+            },
+          },
+          flowTags: { include: { stage: { select: { id: true, name: true } } } },
+        },
+      });
+      return {
+        id: i.id,
+        kind: i.kind,
+        title: i.title,
+        summary: i.summary,
+        severity: i.severity,
+        frequency: i.frequency,
+        archived: i.archived,
+        stages: i.flowTags.map((t) => t.stage).filter(Boolean),
+        evidence: i.evidence.map((e) => ({
+          quote: e.quote,
+          startMs: e.chunk?.startMs ?? null,
+          endMs: e.chunk?.endMs ?? null,
+          page: e.chunk?.page ?? null,
+          sourceId: e.chunk?.source?.id ?? null,
+          sourceName: e.chunk?.source ? e.chunk.source.topic || e.chunk.source.originalName : null,
+          sourceType: e.chunk?.source?.sourceType ?? null,
+        })),
+      };
+    }),
+
+  archive: publicProcedure
+    .input(z.object({ id: z.string().uuid(), archived: z.boolean() }))
+    .mutation(({ input }) =>
+      prisma.insight.update({ where: { id: input.id }, data: { archived: input.archived } }),
+    ),
+
+  delete: publicProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      await prisma.insight.delete({ where: { id: input.id } });
+      return { deleted: true };
     }),
 
   // Insight counts per kind — drives the filter chips on the Insights view.

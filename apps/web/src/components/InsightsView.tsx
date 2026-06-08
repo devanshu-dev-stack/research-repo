@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Chip, SevDots, kindMeta, cardStyle } from "./ui";
+import { InsightDetail } from "./InsightDetail";
 
 export function InsightsView({
   onOpenSource,
@@ -15,6 +16,8 @@ export function InsightsView({
 }) {
   const [kind, setKind] = useState<string | null>(null);
   const [meetingId, setMeetingId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [openInsight, setOpenInsight] = useState<string | null>(null);
 
   const kinds = trpc.insights.kinds.useQuery({});
   const meetings = trpc.meetings.list.useQuery();
@@ -22,6 +25,7 @@ export function InsightsView({
     kind: kind ?? undefined,
     stageId: stageFilter?.id,
     meetingId: meetingId ?? undefined,
+    includeArchived: showArchived,
     limit: 100,
   });
 
@@ -65,6 +69,11 @@ export function InsightsView({
             )}
           </div>
         )}
+
+        <label style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--muted)", display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          Show archived
+        </label>
       </div>
 
       {/* Kind filter chips */}
@@ -88,10 +97,15 @@ export function InsightsView({
         {rows.map((ins) => {
           const m = kindMeta(ins.kind);
           return (
-            <div key={ins.id} style={{ ...cardStyle, padding: "14px 16px", borderLeft: `3px solid ${m.color}` }}>
+            <div
+              key={ins.id}
+              onClick={() => setOpenInsight(ins.id)}
+              style={{ ...cardStyle, padding: "14px 16px", borderLeft: `3px solid ${m.color}`, cursor: "pointer", opacity: ins.archived ? 0.6 : 1 }}
+            >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <Chip color={m.color}>{m.label}</Chip>
+                  {ins.archived && <span style={{ fontSize: 10.5, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>archived</span>}
                   <strong style={{ fontSize: 14.5 }}>{ins.title}</strong>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
@@ -125,7 +139,7 @@ export function InsightsView({
                     {ins.sources.map((src, i) => (
                       <span
                         key={src.id}
-                        onClick={() => onOpenSource(src.id)}
+                        onClick={(e) => { e.stopPropagation(); onOpenSource(src.id); }}
                         style={{ color: "var(--blue)", cursor: "pointer" }}
                       >
                         {src.name}{i < ins.sources.length - 1 ? ", " : ""}
@@ -138,6 +152,10 @@ export function InsightsView({
           );
         })}
       </div>
+
+      {openInsight && (
+        <InsightDetail id={openInsight} onOpenSource={onOpenSource} onClose={() => setOpenInsight(null)} />
+      )}
     </>
   );
 }
