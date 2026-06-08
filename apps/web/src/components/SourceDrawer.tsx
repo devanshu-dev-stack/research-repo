@@ -1,10 +1,19 @@
 "use client";
 
+import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Chip, pillColor } from "./ui";
 
 export function SourceDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const utils = trpc.useUtils();
+  const [editingTitle, setEditingTitle] = useState<string | null>(null);
+  const renameMeeting = trpc.meetings.rename.useMutation({
+    onSuccess: () => {
+      setEditingTitle(null);
+      utils.sources.get.invalidate({ id });
+      utils.meetings.list.invalidate();
+    },
+  });
   const src = trpc.sources.get.useQuery({ id }, { refetchInterval: (q) =>
     // keep polling while it's still processing
     q.state.data && ["pending", "processing"].includes((q.state.data as any).status) ? 3000 : false,
@@ -54,6 +63,40 @@ export function SourceDrawer({ id, onClose }: { id: string; onClose: () => void 
             {s.error && (
               <div style={{ marginTop: 10, fontSize: 12.5, color: "#c2304a", background: "#fff", border: "1px solid #f0c8cf", borderRadius: 8, padding: "8px 10px" }}>
                 {s.error}
+              </div>
+            )}
+
+            {s.meeting && (
+              <div style={{ marginTop: 16 }}>
+                <SectionLabel>Meeting</SectionLabel>
+                {editingTitle !== null ? (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      autoFocus
+                      value={editingTitle}
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      style={{ flex: 1, padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 8, fontSize: 13 }}
+                    />
+                    <button
+                      onClick={() => editingTitle.trim() && renameMeeting.mutate({ id: s.meeting.id, title: editingTitle.trim() })}
+                      style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 8, padding: "0 12px", fontSize: 13 }}
+                    >
+                      Save
+                    </button>
+                    <button onClick={() => setEditingTitle(null)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 8, padding: "0 10px", fontSize: 13 }}>✕</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 14, fontWeight: 500 }}>{s.meeting.title ?? "Untitled (naming…)"}</span>
+                    <button
+                      onClick={() => setEditingTitle(s.meeting.title ?? "")}
+                      title="Rename meeting"
+                      style={{ background: "none", border: "none", color: "var(--blue)", fontSize: 12 }}
+                    >
+                      ✎ rename
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

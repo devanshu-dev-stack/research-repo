@@ -30,8 +30,9 @@ export async function uploadFiles(
     checksumSha256?: string;
     participant?: string;
     topic?: string;
+    meetingId?: string;
   }) => Promise<{ sourceId: string; duplicate: boolean }>,
-  meta: { participant?: string; topic?: string } = {},
+  meta: { participant?: string; topic?: string; meetingId?: string } = {},
 ): Promise<UploadFileResult[]> {
   // 1) Batch presign
   const presignRes = await fetch("/api/upload/presign", {
@@ -64,6 +65,7 @@ export async function uploadFiles(
         checksumSha256: checksum,
         participant: meta.participant,
         topic: meta.topic,
+        meetingId: meta.meetingId,
       });
       return { name: file.name, sourceId: res.sourceId, duplicate: res.duplicate };
     }),

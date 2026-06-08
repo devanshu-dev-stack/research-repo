@@ -91,3 +91,4 @@ export async function runPipeline(sourceId: string): Promise<void> {
 }
 
 export { runExtract, runNormalize, runChunk, runEmbed, runClassify, runInsight };
+export { nameMeetingFromSources, nameMeetingForSource } from "./meeting";

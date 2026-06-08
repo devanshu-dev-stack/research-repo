@@ -9,6 +9,7 @@ import { enqueuePipeline } from "../queue";
 import { router, publicProcedure } from "./trpc";
 import { searchRouter } from "./search";
 import { insightsRouter } from "./insights";
+import { meetingsRouter } from "./meetings";
 
 export const sourcesRouter = router({
   // Batch presign for drag-and-drop / batch uploads.
@@ -77,6 +78,7 @@ export const sourcesRouter = router({
         include: {
           chunks: { orderBy: { ordinal: "asc" } },
           flowTags: { include: { stage: true } },
+          meeting: { select: { id: true, title: true } },
         },
       });
     }),
@@ -93,5 +95,6 @@ export const appRouter = router({
   sources: sourcesRouter,
   search: searchRouter,
   insights: insightsRouter,
+  meetings: meetingsRouter,
 });
 export type AppRouter = typeof appRouter;

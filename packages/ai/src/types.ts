@@ -51,6 +51,9 @@ export interface LLMProvider {
    *  Callers must fall back to extractInsights() when this is undefined. */
   extractInsightsBatch?(chunks: { id: string; text: string }[]): Promise<BatchInsightResult[]>;
   summarize(texts: string[]): Promise<string>;
+  /** Optional: a short, specific title (e.g. for a meeting) from content
+   *  excerpts. Callers fall back to summarize() when undefined. */
+  title?(texts: string[]): Promise<string>;
 }
 
 export interface TranscribeProvider {

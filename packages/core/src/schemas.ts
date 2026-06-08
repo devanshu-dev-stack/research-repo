@@ -42,6 +42,7 @@ export const sourceCreateSchema = z.object({
   size: z.number().int().nonnegative().optional(),
   checksumSha256: z.string().length(64).optional(),
   projectId: z.string().uuid().optional(),
+  meetingId: z.string().uuid().optional(),
   participant: z.string().optional(),
   source: z.string().optional(),
   topic: z.string().optional(),

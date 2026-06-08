@@ -69,6 +69,7 @@ export async function createSource(
   const source = await prisma.source.create({
     data: {
       projectId,
+      meetingId: input.meetingId,
       sourceType,
       status: "pending",
       originalName: input.originalName,

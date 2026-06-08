@@ -180,6 +180,17 @@ export class GeminiLLMProvider implements LLMProvider {
     const raw = await this.call(system, texts.map((t, i) => `${i + 1}. ${t}`).join("\n"), 256);
     return raw.trim();
   }
+
+  /** A short, specific meeting title from content excerpts. */
+  async title(texts: string[]): Promise<string> {
+    const system =
+      "Write a short, specific title (4–8 words) for a research session, from these " +
+      "notes/transcript excerpts. Name the topic, and the persona (student/faculty) if clear. " +
+      "Output ONLY the title — no quotes, no 'Title:', no preamble.";
+    const user = texts.map((t) => t.slice(0, 1500)).join("\n---\n");
+    const raw = await this.call(system, user, 40);
+    return raw.trim();
+  }
 }
 
 function safeJson<T>(s: string): T | null {

@@ -13,6 +13,7 @@ export const insightsRouter = router({
         projectId: z.string().uuid().optional(),
         kind: z.string().optional(),
         stageId: z.string().uuid().optional(),
+        meetingId: z.string().uuid().optional(),
         limit: z.number().int().min(1).max(200).default(100),
       }),
     )
@@ -22,6 +23,9 @@ export const insightsRouter = router({
           projectId: input.projectId,
           kind: input.kind ? (input.kind as any) : undefined,
           flowTags: input.stageId ? { some: { stageId: input.stageId } } : undefined,
+          evidence: input.meetingId
+            ? { some: { chunk: { source: { meetingId: input.meetingId } } } }
+            : undefined,
         },
         orderBy: [{ frequency: "desc" }, { severity: "desc" }],
         take: input.limit,
@@ -32,7 +36,13 @@ export const insightsRouter = router({
               chunk: {
                 select: {
                   source: {
-                    select: { id: true, originalName: true, topic: true, sourceType: true },
+                    select: {
+                      id: true,
+                      originalName: true,
+                      topic: true,
+                      sourceType: true,
+                      meeting: { select: { id: true, title: true } },
+                    },
                   },
                 },
               },
@@ -44,10 +54,12 @@ export const insightsRouter = router({
 
       return insights.map((i) => {
         const sources = new Map<string, { id: string; name: string }>();
+        const meetings = new Map<string, { id: string; title: string }>();
         const evidence = i.evidence.map((e) => {
           const s = e.chunk?.source;
           const name = s ? s.topic || s.originalName : null;
           if (s) sources.set(s.id, { id: s.id, name: name! });
+          if (s?.meeting) meetings.set(s.meeting.id, { id: s.meeting.id, title: s.meeting.title ?? "Untitled meeting" });
           return { quote: e.quote, sourceId: s?.id ?? null, sourceName: name };
         });
         return {
@@ -60,6 +72,7 @@ export const insightsRouter = router({
           stages: i.flowTags.map((t) => t.stage).filter(Boolean),
           evidence,
           sources: [...sources.values()],
+          meetings: [...meetings.values()],
         };
       });
     }),

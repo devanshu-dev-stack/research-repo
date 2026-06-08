@@ -1,6 +1,6 @@
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
-import { runPipeline } from "@research-repo/pipeline";
+import { runPipeline, nameMeetingForSource } from "@research-repo/pipeline";
 
 const connection = new IORedis(process.env.REDIS_URL!, {
   maxRetriesPerRequest: null,
@@ -13,7 +13,12 @@ const worker = new Worker(
   "pipeline",
   async (job) => {
     const { sourceId } = job.data as { sourceId: string };
-    await runPipeline(sourceId);
+    try {
+      await runPipeline(sourceId);
+    } finally {
+      // Best-effort: title the meeting from whatever processed (covers 'partial' too).
+      await nameMeetingForSource(sourceId).catch(() => {});
+    }
   },
   { connection, concurrency: Number(process.env.PIPELINE_CONCURRENCY ?? 4) },
 );
