@@ -8,6 +8,7 @@ import { createSource, presignUploads } from "../sources.service";
 import { enqueuePipeline } from "../queue";
 import { router, publicProcedure } from "./trpc";
 import { searchRouter } from "./search";
+import { insightsRouter } from "./insights";
 
 export const sourcesRouter = router({
   // Batch presign for drag-and-drop / batch uploads.
@@ -88,5 +89,9 @@ export const sourcesRouter = router({
     }),
 });
 
-export const appRouter = router({ sources: sourcesRouter, search: searchRouter });
+export const appRouter = router({
+  sources: sourcesRouter,
+  search: searchRouter,
+  insights: insightsRouter,
+});
 export type AppRouter = typeof appRouter;
