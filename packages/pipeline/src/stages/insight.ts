@@ -4,6 +4,7 @@ import {
   setEmbedding,
   getEmbedding,
   nearestInsights,
+  matchFlowStages,
 } from "@research-repo/db";
 import { getLLMProvider, getEmbedProvider } from "@research-repo/ai";
 import { insightDraftSchema, type InsightDraft } from "@research-repo/core";
@@ -153,23 +154,33 @@ async function upsertInsight(
     },
   });
   await setEmbedding("insights", insight.id, vec);
-
-  // Carry the model's flow-stage hints onto the insight when they resolve.
-  if (draft.flow_stage_hints?.length) {
-    const stages = await prisma.flowStage.findMany({
-      where: { slug: { in: draft.flow_stage_hints } },
-      select: { id: true },
-    });
-    for (const s of stages) {
-      await prisma.insightFlowTag.upsert({
-        where: { insightId_stageId: { insightId: insight.id, stageId: s.id } },
-        update: {},
-        create: { insightId: insight.id, stageId: s.id },
-      });
-    }
-  }
-
+  await tagInsightToStages(insight.id, vec, draft.flow_stage_hints);
   return insight.id;
+}
+
+/** Link an insight to the flow stages it belongs to: the top semantic matches of
+ *  its embedding (same vector match used to classify sources), plus any model
+ *  flow_stage_hints that resolve to a slug. This is what populates the Flow Map's
+ *  per-stage insight counts and the "filter insights by stage" view. */
+async function tagInsightToStages(
+  insightId: string,
+  vec: number[],
+  hints: string[] | undefined,
+): Promise<void> {
+  const stageIds = new Set<string>();
+  const semantic = await matchFlowStages(vec).catch(() => []);
+  for (const s of semantic.slice(0, 3)) stageIds.add(s.id);
+  if (hints?.length) {
+    const hinted = await prisma.flowStage.findMany({ where: { slug: { in: hints } }, select: { id: true } });
+    for (const s of hinted) stageIds.add(s.id);
+  }
+  for (const stageId of stageIds) {
+    await prisma.insightFlowTag.upsert({
+      where: { insightId_stageId: { insightId, stageId } },
+      update: {},
+      create: { insightId, stageId },
+    });
+  }
 }
 
 async function clearPriorEvidence(sourceId: string): Promise<void> {
