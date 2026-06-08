@@ -35,6 +35,18 @@ heuristic insights) so everything runs end-to-end offline — relevance is rough
 but the full flow works. Set `EMBED_PROVIDER=openai` + `LLM_PROVIDER=anthropic`
 with keys in `.env` for production quality.
 
+**Gemini** (`EMBED_PROVIDER=gemini` + `LLM_PROVIDER=gemini`, one `GEMINI_API_KEY`)
+covers embeddings *and* the LLM. The provider paces requests to the free-tier
+per-minute budget (`GEMINI_LLM_RPM` / `GEMINI_EMBED_RPM`), runs them concurrently
+up to `GEMINI_MAX_CONCURRENCY`, batches insight extraction (`INSIGHT_BATCH` chunks
+per call), and auto-retries on 429 — so large files slow down rather than fail.
+
+> **Free-tier daily cap:** `gemini-2.5-flash` allows only ~20 LLM requests/day,
+> so the default `LLM_MODEL` is **`gemini-2.5-flash-lite`** (far higher daily
+> quota). If a day's quota is exhausted the insight stage marks the source
+> `partial` and records the reason; re-run it later (stages are idempotent) or
+> use a paid key. Embeddings have a separate, larger quota.
+
 ## Local dev (without Docker)
 
 Needs Node 20+, pnpm, and a Postgres 16 with pgvector + a Redis + an S3/MinIO.

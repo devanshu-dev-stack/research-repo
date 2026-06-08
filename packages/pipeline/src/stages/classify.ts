@@ -36,33 +36,46 @@ export async function runClassify(sourceId: string): Promise<number> {
   const llm = getLLMProvider();
   const best = new Map<string, StageScore>();
 
+  type Candidate = Awaited<ReturnType<typeof matchFlowStages>>[number];
+
+  // Pass A (DB-only) for every chunk: semantic shortlist + ambiguity flag.
+  const perChunk: { candidates: Candidate[]; ambiguous: boolean }[] = [];
   for (const chunk of chunks) {
     const vec = await getEmbedding("chunks", chunk.id);
-    if (!vec) continue;
-
-    // Pass A — semantic shortlist (already threshold-filtered, score-desc).
-    const candidates = await matchFlowStages(vec, THRESHOLD);
-    if (candidates.length === 0) continue;
-
-    let accepted = candidates;
-
-    // Pass B — only when ambiguous: weak top, or top-two within margin.
-    const top = candidates[0];
-    const close = candidates[1] && top.score - candidates[1].score < AMBIGUOUS_MARGIN;
-    if (top.score < WEAK_TOP || close) {
-      const shortlist = candidates.slice(0, 4);
-      const adjudicated = await llm.classify({
-        text: chunk.text,
-        candidates: shortlist.map((c) => ({ id: c.id, name: c.name, description: c.slug })),
-      });
-      if (adjudicated.length > 0) {
-        const byId = new Map(shortlist.map((c) => [c.id, c]));
-        accepted = adjudicated
-          .filter((m) => byId.has(m.id))
-          .map((m) => ({ ...byId.get(m.id)!, score: m.confidence }));
-      }
+    const candidates = vec ? await matchFlowStages(vec, THRESHOLD) : [];
+    let ambiguous = false;
+    if (candidates.length > 0) {
+      const top = candidates[0];
+      const close = candidates[1] && top.score - candidates[1].score < AMBIGUOUS_MARGIN;
+      ambiguous = top.score < WEAK_TOP || !!close; // weak top, or top-two within margin
     }
+    perChunk.push({ candidates, ambiguous });
+  }
 
+  // Pass B (LLM) only for ambiguous chunks — run concurrently; the provider's
+  // rate limiter paces + retries so a big file doesn't serialize or 429.
+  const adjudications = await Promise.all(
+    chunks.map(async (chunk, i): Promise<Candidate[] | null> => {
+      const { candidates, ambiguous } = perChunk[i];
+      if (!ambiguous || candidates.length === 0) return null;
+      const shortlist = candidates.slice(0, 4);
+      const adjudicated = await llm
+        .classify({
+          text: chunk.text,
+          candidates: shortlist.map((c) => ({ id: c.id, name: c.name, description: c.slug })),
+        })
+        .catch(() => []);
+      if (adjudicated.length === 0) return null;
+      const byId = new Map(shortlist.map((c) => [c.id, c]));
+      return adjudicated
+        .filter((m) => byId.has(m.id))
+        .map((m) => ({ ...byId.get(m.id)!, score: m.confidence }));
+    }),
+  );
+
+  // Merge: an adjudicated override replaces Pass A candidates for that chunk.
+  for (let i = 0; i < chunks.length; i++) {
+    const accepted = adjudications[i] ?? perChunk[i].candidates;
     for (const c of accepted) {
       const prev = best.get(c.id);
       if (!prev || c.score > prev.score) {

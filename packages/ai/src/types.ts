@@ -37,9 +37,19 @@ export interface EmbedProvider {
   embed(texts: string[]): Promise<number[][]>;
 }
 
+export interface BatchInsightResult {
+  chunkId: string;
+  drafts: InsightDraft[];
+}
+
 export interface LLMProvider {
   classify(input: ClassifyInput): Promise<StageMatch[]>;
   extractInsights(chunk: string): Promise<InsightDraft[]>;
+  /** Optional: extract insights for many chunks in ONE request, tagging each
+   *  draft with its source chunkId. Providers that implement it let the insight
+   *  stage collapse N per-chunk calls into N/batch calls (big rate-limit win).
+   *  Callers must fall back to extractInsights() when this is undefined. */
+  extractInsightsBatch?(chunks: { id: string; text: string }[]): Promise<BatchInsightResult[]>;
   summarize(texts: string[]): Promise<string>;
 }
 

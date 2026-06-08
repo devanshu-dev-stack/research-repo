@@ -1,6 +1,6 @@
 import type { ClassifyInput, InsightDraft, LLMProvider, StageMatch } from "../types";
 
-const MODEL = process.env.LLM_MODEL ?? "claude-sonnet-4-6";
+const MODEL = process.env.LLM_MODEL || "claude-sonnet-4-6";
 const API = "https://api.anthropic.com/v1/messages";
 
 // Anthropic LLM provider. Used for Pass B classification (only on ambiguous

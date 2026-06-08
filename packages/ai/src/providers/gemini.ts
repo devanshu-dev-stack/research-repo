@@ -1,10 +1,12 @@
 import type {
+  BatchInsightResult,
   ClassifyInput,
   EmbedProvider,
   InsightDraft,
   LLMProvider,
   StageMatch,
 } from "../types";
+import { geminiFetch } from "../gemini-client";
 
 // Google Gemini provider — covers BOTH capabilities from a single key:
 //   • embeddings via gemini-embedding-001 (Matryoshka; outputs up to 3072 dims,
@@ -16,8 +18,11 @@ import type {
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 const EMBED_DIM = Number(process.env.EMBED_DIM ?? 3072);
-const EMBED_MODEL = process.env.GEMINI_EMBED_MODEL ?? "gemini-embedding-001";
-const LLM_MODEL = process.env.LLM_MODEL ?? "gemini-2.5-flash";
+const EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001";
+// Default to flash-lite: gemini-2.5-flash's free tier is only ~20 requests/day,
+// while flash-lite's free daily quota is far higher — so big files complete
+// without hitting the daily wall. Override with LLM_MODEL for paid tiers.
+const LLM_MODEL = process.env.LLM_MODEL || "gemini-2.5-flash-lite";
 const EMBED_BATCH = 96; // batchEmbedContents accepts up to 100 requests
 // gemini-2.5-* models think by default, and thinking tokens are billed against
 // maxOutputTokens — left on, a 1024-token budget gets spent on reasoning and the
@@ -36,7 +41,7 @@ export class GeminiEmbedProvider implements EmbedProvider {
     const out: number[][] = [];
     for (let i = 0; i < texts.length; i += EMBED_BATCH) {
       const batch = texts.slice(i, i + EMBED_BATCH);
-      const res = await fetch(
+      const res = await geminiFetch(
         `${BASE}/models/${EMBED_MODEL}:batchEmbedContents`,
         {
           method: "POST",
@@ -52,6 +57,7 @@ export class GeminiEmbedProvider implements EmbedProvider {
             })),
           }),
         },
+        "embed",
       );
       if (!res.ok) {
         throw new Error(`Gemini embeddings ${res.status}: ${await res.text()}`);
@@ -79,22 +85,26 @@ export class GeminiLLMProvider implements LLMProvider {
     maxTokens = 1024,
     json = false,
   ): Promise<string> {
-    const res = await fetch(`${BASE}/models/${LLM_MODEL}:generateContent`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": this.apiKey!,
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: "user", parts: [{ text: user }] }],
-        generationConfig: {
-          maxOutputTokens: maxTokens,
-          thinkingConfig: { thinkingBudget: THINKING_BUDGET },
-          ...(json ? { responseMimeType: "application/json" } : {}),
+    const res = await geminiFetch(
+      `${BASE}/models/${LLM_MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": this.apiKey!,
         },
-      }),
-    });
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: "user", parts: [{ text: user }] }],
+          generationConfig: {
+            maxOutputTokens: maxTokens,
+            thinkingConfig: { thinkingBudget: THINKING_BUDGET },
+            ...(json ? { responseMimeType: "application/json" } : {}),
+          },
+        }),
+      },
+      "llm",
+    );
     if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
     const data = (await res.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
@@ -133,6 +143,42 @@ export class GeminiLLMProvider implements LLMProvider {
     const raw = await this.call(system, `"""${chunk}"""`, 1024, true);
     const parsed = safeJson<{ insights: InsightDraft[] }>(raw);
     return parsed?.insights ?? [];
+  }
+
+  /** Batched insight extraction — many chunks in ONE request. Each chunk is
+   *  indexed in the prompt; the model returns insights grouped by that index,
+   *  which we map back to chunkId so the insight stage keeps exact per-chunk
+   *  evidence/quote traceability. Output budget scales with the batch. */
+  async extractInsightsBatch(
+    chunks: { id: string; text: string }[],
+  ): Promise<BatchInsightResult[]> {
+    if (chunks.length === 0) return [];
+    const system =
+      "Extract product-research insights from EACH numbered chunk independently. " +
+      "For each insight give kind " +
+      "(pain_point|feature_request|ux_friction|positive|theme|job_to_be_done|goal), " +
+      "a short title, the exact supporting quote (verbatim from THAT chunk), " +
+      "severity 1-5, sentiment, and any flow_stage_hints. Respond ONLY with JSON: " +
+      `{"results":[{"chunk":<index>,"insights":[{"kind","title","quote","severity","sentiment","flow_stage_hints":[]}]}]}. ` +
+      "Include a result entry for every chunk index (empty insights array if nothing substantive). No prose.";
+    const user = chunks.map((c, i) => `[chunk ${i}]\n"""${c.text}"""`).join("\n\n");
+    // Budget ~1200 output tokens/chunk (dense chunks yield many insights each);
+    // thinking is disabled so it's all answer. Cap well under the flash ceiling.
+    const maxTokens = Math.min(16384, 1024 + 1200 * chunks.length);
+    const raw = await this.call(system, user, maxTokens, true);
+    const parsed = safeJson<{ results: { chunk: number; insights: InsightDraft[] }[] }>(raw);
+    // If the combined JSON didn't parse (e.g. the response still truncated),
+    // fall back to per-chunk extraction so a batch never silently drops insights.
+    if (!parsed?.results) {
+      return Promise.all(
+        chunks.map(async (c) => ({ chunkId: c.id, drafts: await this.extractInsights(c.text) })),
+      );
+    }
+    const byIndex = new Map<number, InsightDraft[]>();
+    for (const r of parsed.results) {
+      if (typeof r.chunk === "number") byIndex.set(r.chunk, Array.isArray(r.insights) ? r.insights : []);
+    }
+    return chunks.map((c, i) => ({ chunkId: c.id, drafts: byIndex.get(i) ?? [] }));
   }
 
   async summarize(texts: string[]): Promise<string> {
