@@ -11,8 +11,16 @@ export function RepositoryView({ onOpenSource }: { onOpenSource: (id: string) =>
   const utils = trpc.useUtils();
 
   const search = trpc.search.query.useQuery(
-    { q, filters: {}, mode: "hybrid", limit: 25 },
-    { refetchInterval: 5000 }, // poll so processing → ready shows up live
+    // Repository shows everything you've uploaded — including pending/processing —
+    // so a file appears immediately with its live status (search defaults to
+    // ready/partial only, which would hide an in-progress upload).
+    {
+      q,
+      filters: { statuses: ["pending", "processing", "ready", "partial", "failed"] },
+      mode: "hybrid",
+      limit: 25,
+    },
+    { refetchInterval: 5000 }, // poll so pending → processing → ready shows up live
   );
 
   const sources = search.data?.sources ?? [];
