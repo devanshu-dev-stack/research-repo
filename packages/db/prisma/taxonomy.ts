@@ -13,19 +13,20 @@ export interface StageSeed {
 }
 
 export const TAXONOMY: StageSeed[] = [
-  // ───────────── STUDENT ─────────────
+  // ───────────── SHARED (both personas) ─────────────
   {
     name: "Auth — Log In",
     slug: "auth-login",
-    persona: "student",
-    seed: "Student signing in to Collage AI to reach a course.",
+    persona: "both",
+    seed: "Signing in to Collage AI — common to students and faculty.",
   },
   {
     name: "Auth — Sign Up",
     slug: "auth-signup",
-    persona: "student",
-    seed: "Student creating an account; students cannot create courses.",
+    persona: "both",
+    seed: "Creating a Collage AI account — common to students and faculty.",
   },
+  // ───────────── STUDENT ─────────────
   {
     name: "Course Home",
     slug: "course-home",
