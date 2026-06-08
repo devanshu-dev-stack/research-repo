@@ -108,20 +108,31 @@ export function InsightsView({
                 </div>
               )}
 
-              <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                {ins.stages.map((st: any) => (
-                  <Chip key={st.id}>{st.name}</Chip>
+              <div style={{ marginTop: 9, display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", fontSize: 11.5 }}>
+                {ins.stages.slice(0, 2).map((st: any) => (
+                  <span key={st.id} style={{ background: "#f0ecdd", color: "var(--muted)", borderRadius: 5, padding: "2px 7px" }}>
+                    {st.name}
+                  </span>
                 ))}
-                {ins.meetings.map((mt) => (
-                  <Chip key={mt.id} color="#8b46c9" onClick={() => setMeetingId(mt.id)} title="Filter to this meeting">
-                    ◇ {mt.title}
-                  </Chip>
-                ))}
-                {ins.sources.map((src) => (
-                  <Chip key={src.id} color="#0382ED" onClick={() => onOpenSource(src.id)} title="Open the file this came from">
-                    ↳ {src.name}
-                  </Chip>
-                ))}
+                {ins.stages.length > 2 && (
+                  <span style={{ color: "var(--muted)" }} title={ins.stages.slice(2).map((s: any) => s.name).join(", ")}>
+                    +{ins.stages.length - 2}
+                  </span>
+                )}
+                {ins.sources.length > 0 && (
+                  <span style={{ marginLeft: "auto", color: "var(--muted)" }} title="Open the file this came from">
+                    ↳{" "}
+                    {ins.sources.map((src, i) => (
+                      <span
+                        key={src.id}
+                        onClick={() => onOpenSource(src.id)}
+                        style={{ color: "var(--blue)", cursor: "pointer" }}
+                      >
+                        {src.name}{i < ins.sources.length - 1 ? ", " : ""}
+                      </span>
+                    ))}
+                  </span>
+                )}
               </div>
             </div>
           );
