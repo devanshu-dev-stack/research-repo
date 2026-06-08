@@ -2,6 +2,7 @@ import { prisma } from "@research-repo/db";
 import { presignGet, getObjectBytes } from "../storage";
 import {
   DeepgramTranscriber,
+  GeminiTranscriber,
   LocalDocExtractor,
   NoopExtract,
   TesseractOCR,
@@ -11,10 +12,13 @@ import {
   type Transcriber,
 } from "../extractors";
 
-// Provider selection (env), with resilient no-op fallbacks.
+// Provider selection (env), with resilient no-op fallbacks. When a Gemini key
+// is present, transcription defaults to Gemini so audio/video "just works".
 function transcriber(): Transcriber {
-  const c = (process.env.TRANSCRIBE_PROVIDER ?? "noop").toLowerCase();
+  const def = process.env.GEMINI_API_KEY ? "gemini" : "noop";
+  const c = (process.env.TRANSCRIBE_PROVIDER || def).toLowerCase();
   if (c === "deepgram" && process.env.DEEPGRAM_API_KEY) return new DeepgramTranscriber();
+  if (c === "gemini" && process.env.GEMINI_API_KEY) return new GeminiTranscriber();
   return new NoopExtract();
 }
 function ocr(): OCREngine {
@@ -44,21 +48,25 @@ export async function runExtract(sourceId: string): Promise<void> {
   if (["note", "transcript", "survey"].includes(source.sourceType)) return;
 
   let result: ExtractResult = { content: "", units: [] };
-  const bytes = await getObjectBytes(source.storageKey);
 
   switch (source.sourceType) {
     case "audio":
     case "video": {
+      const t = transcriber();
       const url = await presignGet(source.storageKey);
-      result = await transcriber().transcribe(url, bytes);
+      // Gemini streams the audio track from the URL via ffmpeg (no full-file
+      // buffer — important for large videos); Deepgram needs the raw bytes.
+      const bytes =
+        t instanceof DeepgramTranscriber ? await getObjectBytes(source.storageKey) : Buffer.alloc(0);
+      result = await t.transcribe(url, bytes, source.mimeType ?? undefined);
       break;
     }
     case "image":
-      result = await ocr().ocr(bytes);
+      result = await ocr().ocr(await getObjectBytes(source.storageKey));
       break;
     case "pdf":
     case "doc":
-      result = await docExtractor().extract(bytes, source.mimeType);
+      result = await docExtractor().extract(await getObjectBytes(source.storageKey), source.mimeType);
       break;
     default:
       return; // 'other' — leave for manual handling
