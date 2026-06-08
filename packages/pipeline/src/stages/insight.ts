@@ -51,6 +51,7 @@ export async function runInsight(sourceId: string): Promise<number> {
   for (let i = 0; i < chunks.length; i += INSIGHT_BATCH) {
     batches.push(chunks.slice(i, i + INSIGHT_BATCH));
   }
+  let extractionError: string | null = null;
   const extracted = await Promise.all(
     batches.map(async (batch) => {
       try {
@@ -61,7 +62,10 @@ export async function runInsight(sourceId: string): Promise<number> {
             drafts: await llm.extractInsights(c.text).catch(() => [] as InsightDraft[]),
           })),
         );
-      } catch {
+      } catch (e) {
+        // Remember WHY a batch failed (e.g. Gemini quota) so we can surface it
+        // instead of silently marking the source ready with no insights.
+        extractionError = e instanceof Error ? e.message : String(e);
         return batch.map((c) => ({ chunkId: c.id, drafts: [] as InsightDraft[] }));
       }
     }),
@@ -75,6 +79,13 @@ export async function runInsight(sourceId: string): Promise<number> {
       const parsed = insightDraftSchema.safeParse(d);
       if (parsed.success) pairs.push({ chunkId: group.chunkId, draft: parsed.data });
     }
+  }
+
+  // If extraction errored AND produced nothing, fail loudly: the source becomes
+  // 'partial' with the reason (instead of a silent "ready, 0 insights"), and can
+  // be re-run from the source drawer once quota frees up.
+  if (pairs.length === 0 && extractionError) {
+    throw new Error(`Insight extraction failed (no insights produced): ${extractionError}`);
   }
 
   // 3) Embed every draft in a single batched call (the embedder splits into
