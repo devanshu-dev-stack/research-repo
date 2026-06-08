@@ -3,6 +3,9 @@ import { LocalStubProvider } from "./providers/local";
 import { OpenAIEmbedProvider } from "./providers/openai";
 import { AnthropicLLMProvider } from "./providers/anthropic";
 import { GeminiEmbedProvider, GeminiLLMProvider } from "./providers/gemini";
+import { hasGeminiKey } from "./gemini-client";
+
+export { hasGeminiKey, geminiKeyCount, pickGeminiKey, coolDownKey } from "./gemini-client";
 
 let _embed: EmbedProvider | null = null;
 let _llm: LLMProvider | null = null;
@@ -18,13 +21,13 @@ export function getEmbedProvider(): EmbedProvider {
   const choice = (process.env.EMBED_PROVIDER ?? "local").toLowerCase();
   if (choice === "openai" && process.env.OPENAI_API_KEY) {
     _embed = new OpenAIEmbedProvider();
-  } else if (choice === "gemini" && process.env.GEMINI_API_KEY) {
+  } else if (choice === "gemini" && hasGeminiKey()) {
     _embed = new GeminiEmbedProvider();
   } else {
     if (choice === "openai") {
       console.warn("EMBED_PROVIDER=openai but OPENAI_API_KEY missing; using local stub");
     } else if (choice === "gemini") {
-      console.warn("EMBED_PROVIDER=gemini but GEMINI_API_KEY missing; using local stub");
+      console.warn("EMBED_PROVIDER=gemini but GEMINI_API_KEY(S) missing; using local stub");
     }
     _embed = stub();
   }
@@ -39,13 +42,13 @@ export function getLLMProvider(): LLMProvider {
   const choice = (process.env.LLM_PROVIDER ?? "local").toLowerCase();
   if (choice === "anthropic" && process.env.ANTHROPIC_API_KEY) {
     _llm = new AnthropicLLMProvider();
-  } else if (choice === "gemini" && process.env.GEMINI_API_KEY) {
+  } else if (choice === "gemini" && hasGeminiKey()) {
     _llm = new GeminiLLMProvider();
   } else {
     if (choice === "anthropic") {
       console.warn("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY missing; using local stub");
     } else if (choice === "gemini") {
-      console.warn("LLM_PROVIDER=gemini but GEMINI_API_KEY missing; using local stub");
+      console.warn("LLM_PROVIDER=gemini but GEMINI_API_KEY(S) missing; using local stub");
     }
     _llm = stub();
   }

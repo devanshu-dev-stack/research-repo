@@ -1,4 +1,5 @@
 import { prisma } from "@research-repo/db";
+import { hasGeminiKey } from "@research-repo/ai";
 import { presignGet, getObjectBytes } from "../storage";
 import {
   DeepgramTranscriber,
@@ -15,10 +16,10 @@ import {
 // Provider selection (env), with resilient no-op fallbacks. When a Gemini key
 // is present, transcription defaults to Gemini so audio/video "just works".
 function transcriber(): Transcriber {
-  const def = process.env.GEMINI_API_KEY ? "gemini" : "noop";
+  const def = hasGeminiKey() ? "gemini" : "noop";
   const c = (process.env.TRANSCRIBE_PROVIDER || def).toLowerCase();
   if (c === "deepgram" && process.env.DEEPGRAM_API_KEY) return new DeepgramTranscriber();
-  if (c === "gemini" && process.env.GEMINI_API_KEY) return new GeminiTranscriber();
+  if (c === "gemini" && hasGeminiKey()) return new GeminiTranscriber();
   return new NoopExtract();
 }
 function ocr(): OCREngine {

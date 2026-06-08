@@ -5,6 +5,7 @@
 
 import { spawn } from "node:child_process";
 import type { ChunkInput } from "@research-repo/core";
+import { hasGeminiKey, geminiKeyCount, pickGeminiKey, coolDownKey } from "@research-repo/ai";
 
 export interface ExtractResult {
   content: string;
@@ -57,32 +58,57 @@ export class DeepgramTranscriber implements Transcriber {
 const GEMINI_BASE = "https://generativelanguage.googleapis.com";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Thrown on a 429 so the transcriber can rotate to the next key. An upload URL
+// is bound to the key that started it, so a whole transcription uses ONE key and
+// we retry the entire flow (re-upload) with the next key on quota exhaustion.
+class Quota429 extends Error {
+  constructor(public perDay: boolean, msg: string) {
+    super(msg);
+  }
+}
+
 export class GeminiTranscriber implements Transcriber {
   private model =
     process.env.GEMINI_TRANSCRIBE_MODEL || process.env.LLM_MODEL || "gemini-2.5-flash-lite";
-  constructor(private apiKey = process.env.GEMINI_API_KEY) {
-    if (!this.apiKey) throw new Error("GEMINI_API_KEY not set");
+  constructor() {
+    if (!hasGeminiKey()) throw new Error("GEMINI_API_KEY(S) not set");
   }
 
   async transcribe(fileUrl: string, _bytes: Buffer, _mime?: string): Promise<ExtractResult> {
     const audio = await extractAudioMp3(fileUrl);
     if (audio.length === 0) return { content: "", units: [] };
-    const fileUri = await this.uploadFile(audio, "audio/mpeg");
     const prompt =
       "Transcribe this recording verbatim in English. Prefix each speaker turn " +
       "(or roughly every 30 seconds) with a timestamp marker like [MM:SS]. Label " +
       "distinguishable speakers as 'Speaker 1:', 'Speaker 2:', etc. Output ONLY the " +
       "transcript text — no preamble, summary, or commentary.";
-    const text = await this.generate(fileUri, "audio/mpeg", prompt);
-    return parseTimestampedTranscript(text);
+
+    let lastErr: unknown = null;
+    for (let i = 0; i < Math.max(1, geminiKeyCount()); i++) {
+      const key = pickGeminiKey();
+      if (!key) break;
+      try {
+        const fileUri = await this.uploadFile(audio, "audio/mpeg", key);
+        const text = await this.generate(fileUri, "audio/mpeg", prompt, key);
+        return parseTimestampedTranscript(text);
+      } catch (e) {
+        lastErr = e;
+        if (e instanceof Quota429) {
+          coolDownKey(key, e.perDay); // bench this key, try the next
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error("Gemini transcription: all keys exhausted");
   }
 
   // Resumable File API upload → returns the file URI once the file is ACTIVE.
-  private async uploadFile(bytes: Buffer, mime: string): Promise<string> {
+  private async uploadFile(bytes: Buffer, mime: string, key: string): Promise<string> {
     const start = await fetch(`${GEMINI_BASE}/upload/v1beta/files`, {
       method: "POST",
       headers: {
-        "x-goog-api-key": this.apiKey!,
+        "x-goog-api-key": key,
         "X-Goog-Upload-Protocol": "resumable",
         "X-Goog-Upload-Command": "start",
         "X-Goog-Upload-Header-Content-Length": String(bytes.length),
@@ -91,6 +117,7 @@ export class GeminiTranscriber implements Transcriber {
       },
       body: JSON.stringify({ file: { display_name: "transcription-audio" } }),
     });
+    if (start.status === 429) throw new Quota429(false, await start.text());
     if (!start.ok) throw new Error(`Gemini file start ${start.status}: ${await start.text()}`);
     const uploadUrl = start.headers.get("x-goog-upload-url");
     if (!uploadUrl) throw new Error("Gemini file upload URL missing from start response");
@@ -111,7 +138,7 @@ export class GeminiTranscriber implements Transcriber {
     for (let i = 0; file.state === "PROCESSING" && i < 90; i++) {
       await sleep(2000);
       const poll = await fetch(`${GEMINI_BASE}/v1beta/${file.name}`, {
-        headers: { "x-goog-api-key": this.apiKey! },
+        headers: { "x-goog-api-key": key },
       });
       file = (await poll.json()) as any;
     }
@@ -119,10 +146,10 @@ export class GeminiTranscriber implements Transcriber {
     return file.uri;
   }
 
-  private async generate(fileUri: string, mime: string, prompt: string): Promise<string> {
+  private async generate(fileUri: string, mime: string, prompt: string, key: string): Promise<string> {
     const res = await fetch(`${GEMINI_BASE}/v1beta/models/${this.model}:generateContent`, {
       method: "POST",
-      headers: { "x-goog-api-key": this.apiKey!, "Content-Type": "application/json" },
+      headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [
           {
@@ -133,11 +160,13 @@ export class GeminiTranscriber implements Transcriber {
         generationConfig: { maxOutputTokens: 32768, thinkingConfig: { thinkingBudget: 0 } },
       }),
     });
+    if (res.status === 429) {
+      const body = await res.text();
+      throw new Quota429(/PerDay/i.test(body), `Gemini transcribe 429: ${body}`);
+    }
     if (!res.ok) throw new Error(`Gemini transcribe ${res.status}: ${await res.text()}`);
     const data = (await res.json()) as any;
-    return (
-      data.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? ""
-    );
+    return data.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "";
   }
 }
 

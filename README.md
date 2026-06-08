@@ -101,9 +101,15 @@ honoring the server's `retryDelay`. So large files slow down instead of failing.
 > reason, and you can re-run it later from the source drawer — stages are idempotent.
 > Embeddings have a separate, larger quota.
 
+**Multiple keys (raise the daily ceiling).** Free-tier quota is **per GCP project**,
+so set `GEMINI_API_KEYS=key1,key2,key3` with keys from *different* projects. Each key
+gets its own per-minute budget and the client rotates to the next on a 429 (benching
+a per-day-exhausted key for ~30 min), so you're only blocked once *all* keys are
+spent. Keys in the same project share quota and don't help.
+
 Tunables (all optional, env-overridable): `GEMINI_LLM_RPM` (10), `GEMINI_EMBED_RPM`
 (100), `GEMINI_MAX_CONCURRENCY` (4), `GEMINI_MAX_RETRIES` (5), `INSIGHT_BATCH` (8),
-`LLM_MODEL`, `GEMINI_TRANSCRIBE_MODEL`.
+`GEMINI_KEY_COOLDOWN_MS` (30 min), `LLM_MODEL`, `GEMINI_TRANSCRIBE_MODEL`.
 
 ---
 

@@ -6,7 +6,7 @@ import type {
   LLMProvider,
   StageMatch,
 } from "../types";
-import { geminiFetch } from "../gemini-client";
+import { geminiFetch, hasGeminiKey } from "../gemini-client";
 
 // Google Gemini provider — covers BOTH capabilities from a single key:
 //   • embeddings via gemini-embedding-001 (Matryoshka; outputs up to 3072 dims,
@@ -32,8 +32,8 @@ const EMBED_BATCH = 96; // batchEmbedContents accepts up to 100 requests
 const THINKING_BUDGET = Number(process.env.GEMINI_THINKING_BUDGET ?? 0);
 
 export class GeminiEmbedProvider implements EmbedProvider {
-  constructor(private apiKey = process.env.GEMINI_API_KEY) {
-    if (!this.apiKey) throw new Error("GEMINI_API_KEY not set");
+  constructor() {
+    if (!hasGeminiKey()) throw new Error("GEMINI_API_KEY(S) not set");
   }
 
   async embed(texts: string[]): Promise<number[][]> {
@@ -45,10 +45,7 @@ export class GeminiEmbedProvider implements EmbedProvider {
         `${BASE}/models/${EMBED_MODEL}:batchEmbedContents`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": this.apiKey!,
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             requests: batch.map((text) => ({
               model: `models/${EMBED_MODEL}`,
@@ -75,8 +72,8 @@ export class GeminiEmbedProvider implements EmbedProvider {
 // cross-evidence summaries. JSON-shaped calls request responseMimeType
 // application/json so the model returns parseable JSON without fences.
 export class GeminiLLMProvider implements LLMProvider {
-  constructor(private apiKey = process.env.GEMINI_API_KEY) {
-    if (!this.apiKey) throw new Error("GEMINI_API_KEY not set");
+  constructor() {
+    if (!hasGeminiKey()) throw new Error("GEMINI_API_KEY(S) not set");
   }
 
   private async call(
@@ -89,10 +86,7 @@ export class GeminiLLMProvider implements LLMProvider {
       `${BASE}/models/${LLM_MODEL}:generateContent`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": this.apiKey!,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
           contents: [{ role: "user", parts: [{ text: user }] }],
