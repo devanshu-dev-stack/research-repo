@@ -1,0 +1,308 @@
+// Research Repository — Prisma schema
+// Postgres 16 + pgvector. Vector columns are declared as Unsupported("vector(N)")
+// because Prisma has no native vector type; reads/writes use raw SQL ($queryRaw).
+// EMBED_DIM must match the embedding model (default 3072 = OpenAI text-embedding-3-large).
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [vector, pg_trgm, uuidOssp(map: "uuid-ossp")]
+}
+
+// ─────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────
+enum SourceType {
+  survey
+  video
+  audio
+  transcript
+  note
+  pdf
+  doc
+  image
+  other
+}
+
+enum ProcessingStatus {
+  pending
+  processing
+  ready
+  failed
+  partial
+}
+
+enum TagOrigin {
+  auto
+  manual
+  override
+}
+
+enum InsightKind {
+  pain_point
+  feature_request
+  ux_friction
+  positive
+  theme
+  job_to_be_done
+  goal
+}
+
+enum Persona {
+  student
+  faculty
+  both
+}
+
+// ─────────────────────────────────────────────────────────
+// Projects / collections
+// ─────────────────────────────────────────────────────────
+model Project {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  sources  Source[]
+  insights Insight[]
+
+  @@map("projects")
+}
+
+// ─────────────────────────────────────────────────────────
+// User-flow taxonomy (Student / Faculty stages from FigJam)
+// Self-referential for nested stages.
+// ─────────────────────────────────────────────────────────
+model FlowStage {
+  id          String  @id @default(uuid()) @db.Uuid
+  parentId    String? @map("parent_id") @db.Uuid
+  persona     Persona @default(both)
+  name        String
+  slug        String
+  description String? // seeds the classifier prompt + embedding
+  position    Int     @default(0)
+  sourceRef   String? @map("source_ref") // FigJam node id, for re-sync
+
+  // embedding vector(EMBED_DIM) — added via raw SQL migration, not modeled here
+  embedding Unsupported("vector(3072)")?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  parent   FlowStage?  @relation("StageTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children FlowStage[] @relation("StageTree")
+
+  sourceTags  SourceFlowTag[]
+  insightTags InsightFlowTag[]
+
+  @@unique([parentId, slug])
+  @@index([persona])
+  @@map("flow_stages")
+}
+
+// ─────────────────────────────────────────────────────────
+// Sources = one uploaded research artifact (the unified object)
+// ─────────────────────────────────────────────────────────
+model Source {
+  id     String           @id @default(uuid()) @db.Uuid
+  projectId String?       @map("project_id") @db.Uuid
+  sourceType SourceType   @map("source_type")
+  status ProcessingStatus @default(pending)
+
+  // naming + file
+  originalName   String  @map("original_name")
+  canonicalName  String? @map("canonical_name")
+  storageKey     String  @map("storage_key")
+  mimeType       String? @map("mime_type")
+  byteSize       BigInt? @map("byte_size")
+  checksumSha256 String? @unique @map("checksum_sha256")
+
+  // normalized content
+  participant String?
+  topic       String?
+  content     String? // canonical extracted text
+  transcript  String?
+  sentiment   String? // positive | neutral | negative | mixed
+  language    String?
+
+  // timestamps
+  recordedAt  DateTime? @map("recorded_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  processedAt DateTime? @map("processed_at")
+
+  metadata Json   @default("{}")
+  error    String?
+
+  project   Project?         @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  chunks    Chunk[]
+  flowTags  SourceFlowTag[]
+  tags      SourceTag[]
+  jobs      ProcessingJob[]
+
+  @@index([projectId])
+  @@index([status])
+  @@index([sourceType])
+  @@index([recordedAt])
+  @@map("sources")
+}
+
+// ─────────────────────────────────────────────────────────
+// Chunks = retrievable units (RAG + timestamped traceability)
+// ─────────────────────────────────────────────────────────
+model Chunk {
+  id       String @id @default(uuid()) @db.Uuid
+  sourceId String @map("source_id") @db.Uuid
+  ordinal  Int
+  text     String
+
+  embedding Unsupported("vector(3072)")?
+
+  // full-text search vector (generated column; managed by migration)
+  textTsv Unsupported("tsvector")? @map("text_tsv")
+
+  // media traceability
+  startMs Int?  @map("start_ms")
+  endMs   Int?  @map("end_ms")
+  page    Int?
+  bbox    Json?
+
+  // survey traceability
+  responseRef String? @map("response_ref")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  source   Source            @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  evidence InsightEvidence[]
+
+  @@index([sourceId])
+  @@map("chunks")
+}
+
+// ─────────────────────────────────────────────────────────
+// Tags: flow-stage tagging (M:N) + free-form tags
+// ─────────────────────────────────────────────────────────
+model SourceFlowTag {
+  sourceId   String    @map("source_id") @db.Uuid
+  stageId    String    @map("stage_id") @db.Uuid
+  confidence Float?
+  origin     TagOrigin @default(auto)
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  source Source    @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  stage  FlowStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  @@id([sourceId, stageId])
+  @@index([stageId])
+  @@map("source_flow_tags")
+}
+
+model Tag {
+  id    String @id @default(uuid()) @db.Uuid
+  name  String @unique
+  color String?
+
+  sources SourceTag[]
+
+  @@map("tags")
+}
+
+model SourceTag {
+  sourceId String @map("source_id") @db.Uuid
+  tagId    String @map("tag_id") @db.Uuid
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([sourceId, tagId])
+  @@map("source_tags")
+}
+
+// ─────────────────────────────────────────────────────────
+// Insights = reusable entities extracted from sources
+// ─────────────────────────────────────────────────────────
+model Insight {
+  id        String      @id @default(uuid()) @db.Uuid
+  projectId String?     @map("project_id") @db.Uuid
+  kind      InsightKind
+  title     String
+  summary   String?
+  severity  Int?
+  frequency Int         @default(1)
+  clusterId String?     @map("cluster_id") @db.Uuid
+
+  embedding Unsupported("vector(3072)")?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project  Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  evidence InsightEvidence[]
+  flowTags InsightFlowTag[]
+
+  @@index([kind])
+  @@index([clusterId])
+  @@map("insights")
+}
+
+// Evidence links every insight back to a specific chunk (= source + timestamp/page)
+model InsightEvidence {
+  id        String   @id @default(uuid()) @db.Uuid
+  insightId String   @map("insight_id") @db.Uuid
+  chunkId   String   @map("chunk_id") @db.Uuid
+  quote     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  insight Insight @relation(fields: [insightId], references: [id], onDelete: Cascade)
+  chunk   Chunk   @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  @@index([insightId])
+  @@index([chunkId])
+  @@map("insight_evidence")
+}
+
+model InsightFlowTag {
+  insightId String @map("insight_id") @db.Uuid
+  stageId   String @map("stage_id") @db.Uuid
+
+  insight Insight   @relation(fields: [insightId], references: [id], onDelete: Cascade)
+  stage   FlowStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  @@id([insightId, stageId])
+  @@map("insight_flow_tags")
+}
+
+// ─────────────────────────────────────────────────────────
+// Saved views / collections
+// ─────────────────────────────────────────────────────────
+model SavedView {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  filters   Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("saved_views")
+}
+
+// ─────────────────────────────────────────────────────────
+// Job audit (mirrors BullMQ; queryable + permanent)
+// ─────────────────────────────────────────────────────────
+model ProcessingJob {
+  id        String    @id @default(uuid()) @db.Uuid
+  sourceId  String?   @map("source_id") @db.Uuid
+  stage     String
+  status    String
+  attempts  Int       @default(0)
+  error     String?
+  startedAt DateTime? @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+
+  source Source? @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId])
+  @@map("processing_jobs")
+}

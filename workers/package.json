@@ -1,0 +1,13 @@
+{
+  "name": "@research-repo/workers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "tsx watch src/index.ts", "start": "tsx src/index.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": {
+    "@research-repo/pipeline": "workspace:*",
+    "bullmq": "^5.34.0",
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": { "@types/node": "^20", "tsx": "^4.19.2", "typescript": "^5.6.3" }
+}
