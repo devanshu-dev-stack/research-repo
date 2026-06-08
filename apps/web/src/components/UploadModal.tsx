@@ -24,32 +24,50 @@ const STATUS_LEGEND = [
   { s: "failed", text: "couldn't be processed — check the file and re-run" },
 ];
 
+type MeetingGroup = { typeIdx: number; files: { file: File; type: string }[] };
+
 export function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const [typeIdx, setTypeIdx] = useState(0);
-  const [staged, setStaged] = useState<{ file: File; type: string }[]>([]);
+  const [groups, setGroups] = useState<MeetingGroup[]>([{ typeIdx: 0, files: [] }]);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const activeGroup = useRef(0);
+  const activeAccept = useRef<string>("");
 
   const createMeeting = trpc.meetings.create.useMutation();
   const createSource = trpc.sources.create.useMutation();
 
+  function setGroup(i: number, patch: Partial<MeetingGroup>) {
+    setGroups((prev) => prev.map((g, j) => (j === i ? { ...g, ...patch } : g)));
+  }
+  function openPicker(i: number) {
+    activeGroup.current = i;
+    activeAccept.current = TYPES[groups[i].typeIdx].accept;
+    if (fileRef.current) {
+      fileRef.current.accept = activeAccept.current;
+      fileRef.current.click();
+    }
+  }
   function addPicked(files: FileList | null) {
     if (!files?.length) return;
-    const type = TYPES[typeIdx].label;
-    setStaged((prev) => [...prev, ...Array.from(files).map((file) => ({ file, type }))]);
+    const i = activeGroup.current;
+    const type = TYPES[groups[i].typeIdx].label;
+    const added = Array.from(files).map((file) => ({ file, type }));
+    setGroups((prev) => prev.map((g, j) => (j === i ? { ...g, files: [...g.files, ...added] } : g)));
     if (fileRef.current) fileRef.current.value = "";
   }
 
+  const totalFiles = groups.reduce((n, g) => n + g.files.length, 0);
+  const nonEmpty = groups.filter((g) => g.files.length > 0);
+
   async function upload() {
-    if (staged.length === 0) return;
+    if (nonEmpty.length === 0) return;
     setBusy(true);
     try {
-      const { id: meetingId } = await createMeeting.mutateAsync({});
-      await uploadFiles(
-        staged.map((s) => s.file),
-        (input) => createSource.mutateAsync(input),
-        { meetingId },
-      );
+      // One Meeting per non-empty group; its files upload into it.
+      for (const g of nonEmpty) {
+        const { id: meetingId } = await createMeeting.mutateAsync({});
+        await uploadFiles(g.files.map((s) => s.file), (input) => createSource.mutateAsync(input), { meetingId });
+      }
       onDone();
       onClose();
     } finally {
@@ -64,70 +82,90 @@ export function UploadModal({ onClose, onDone }: { onClose: () => void; onDone: 
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(560px, 94vw)", maxHeight: "88vh", overflowY: "auto", background: "var(--cream)", border: "1px solid var(--line)", borderRadius: 14, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}
+        style={{ width: "min(600px, 94vw)", maxHeight: "90vh", overflowY: "auto", background: "var(--cream)", border: "1px solid var(--line)", borderRadius: 14, padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <h2 style={{ fontSize: 22 }}>Add a meeting</h2>
+          <h2 style={{ fontSize: 22 }}>Add meetings</h2>
           <button onClick={onClose} disabled={busy} style={{ background: "none", border: "none", fontSize: 20, color: "var(--muted)" }}>✕</button>
         </div>
         <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>
-          Add all the files from one research session — a recording, notes, a survey — and they’ll be
-          grouped together and named automatically. Insights will trace back to this meeting.
+          Each meeting groups the files from one research session (a recording, notes, a survey).
+          Add as many meetings as you like, then upload them all at once — each is named automatically.
         </p>
 
-        {/* Step 1: choose a type, add files */}
-        <div style={{ marginTop: 18, background: "#fff", border: "1px solid var(--line)", borderRadius: 10, padding: 14 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, color: "#4a4636" }}>1 · What are you adding?</label>
-          <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <select
-              value={typeIdx}
-              onChange={(e) => setTypeIdx(Number(e.target.value))}
-              style={{ padding: "9px 12px", border: "1px solid var(--line)", borderRadius: 8, background: "#fff", fontSize: 14, flex: "1 1 200px" }}
-            >
-              {TYPES.map((t, i) => (
-                <option key={t.label} value={i}>{t.label}</option>
-              ))}
-            </select>
-            <button
-              onClick={() => fileRef.current?.click()}
-              style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 14, fontWeight: 600 }}
-            >
-              + Add files
-            </button>
-            <input ref={fileRef} type="file" multiple hidden accept={TYPES[typeIdx].accept || undefined} onChange={(e) => addPicked(e.target.files)} />
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>{TYPES[typeIdx].hint}</div>
-        </div>
+        <input ref={fileRef} type="file" multiple hidden onChange={(e) => addPicked(e.target.files)} />
 
-        {/* Step 2: staged files */}
-        <div style={{ marginTop: 14 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, color: "#4a4636" }}>
-            2 · Files in this meeting {staged.length > 0 && `(${staged.length})`}
-          </label>
-          {staged.length === 0 ? (
-            <div style={{ fontSize: 13, color: "var(--muted)", padding: "14px 0" }}>
-              No files yet — pick a type above and add one or more.
-            </div>
-          ) : (
-            <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
-              {staged.map((s, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, background: "#fff", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px" }}>
-                  <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {s.file.name} <span style={{ color: "var(--muted)", fontSize: 11 }}>· {s.type}</span>
-                  </span>
-                  <button onClick={() => setStaged((p) => p.filter((_, j) => j !== i))} disabled={busy} style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 14 }}>✕</button>
+        <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
+          {groups.map((g, i) => (
+            <div key={i} style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 10, padding: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <strong style={{ fontSize: 14, fontFamily: "var(--serif)" }}>Meeting {i + 1}</strong>
+                {groups.length > 1 && (
+                  <button
+                    onClick={() => setGroups((prev) => prev.filter((_, j) => j !== i))}
+                    disabled={busy}
+                    style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 12 }}
+                  >
+                    remove meeting ✕
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <select
+                  value={g.typeIdx}
+                  onChange={(e) => setGroup(i, { typeIdx: Number(e.target.value) })}
+                  style={{ padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#fff", fontSize: 13, flex: "1 1 180px" }}
+                >
+                  {TYPES.map((t, ti) => (
+                    <option key={t.label} value={ti}>{t.label}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => openPicker(i)}
+                  style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600 }}
+                >
+                  + Add files
+                </button>
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 5 }}>{TYPES[g.typeIdx].hint}</div>
+
+              {g.files.length > 0 && (
+                <div style={{ marginTop: 10, display: "grid", gap: 5 }}>
+                  {g.files.map((s, fi) => (
+                    <div key={fi} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, background: "var(--cream)", border: "1px solid var(--line)", borderRadius: 7, padding: "6px 9px" }}>
+                      <span style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {s.file.name} <span style={{ color: "var(--muted)", fontSize: 11 }}>· {s.type}</span>
+                      </span>
+                      <button
+                        onClick={() => setGroup(i, { files: g.files.filter((_, j) => j !== fi) })}
+                        disabled={busy}
+                        style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13 }}
+                      >✕</button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )}
+          ))}
         </div>
 
         <button
-          onClick={upload}
-          disabled={busy || staged.length === 0}
-          style={{ marginTop: 18, width: "100%", background: "var(--orange)", color: "#fff", border: "none", borderRadius: 8, padding: "12px", fontSize: 15, fontWeight: 600, opacity: busy || staged.length === 0 ? 0.5 : 1 }}
+          onClick={() => setGroups((prev) => [...prev, { typeIdx: 0, files: [] }])}
+          disabled={busy}
+          style={{ marginTop: 12, width: "100%", background: "#fff", color: "var(--navy)", border: "1px dashed var(--navy)", borderRadius: 8, padding: "9px", fontSize: 13.5, fontWeight: 600 }}
         >
-          {busy ? "Uploading…" : `Upload ${staged.length || ""} file${staged.length === 1 ? "" : "s"} as one meeting`}
+          + Add another meeting
+        </button>
+
+        <button
+          onClick={upload}
+          disabled={busy || nonEmpty.length === 0}
+          style={{ marginTop: 12, width: "100%", background: "var(--orange)", color: "#fff", border: "none", borderRadius: 8, padding: "12px", fontSize: 15, fontWeight: 600, opacity: busy || nonEmpty.length === 0 ? 0.5 : 1 }}
+        >
+          {busy
+            ? "Uploading…"
+            : `Upload ${totalFiles} file${totalFiles === 1 ? "" : "s"} across ${nonEmpty.length || 0} meeting${nonEmpty.length === 1 ? "" : "s"}`}
         </button>
 
         {/* Footer: what the statuses mean */}

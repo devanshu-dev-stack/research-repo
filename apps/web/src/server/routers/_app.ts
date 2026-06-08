@@ -4,7 +4,7 @@ import {
 } from "@research-repo/core";
 import { z } from "zod";
 import { prisma } from "@research-repo/db";
-import { createSource, presignUploads } from "../sources.service";
+import { createSource, deleteSource, presignUploads } from "../sources.service";
 import { enqueuePipeline } from "../queue";
 import { router, publicProcedure } from "./trpc";
 import { searchRouter } from "./search";
@@ -89,6 +89,11 @@ export const sourcesRouter = router({
       await enqueuePipeline(input.id);
       return { ok: true };
     }),
+
+  // Remove a source and everything derived from it.
+  delete: publicProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ input }) => deleteSource(input.id)),
 });
 
 export const appRouter = router({

@@ -11,7 +11,7 @@ import {
   uploadStagingKey,
   s3,
 } from "@research-repo/pipeline/storage";
-import { CopyObjectCommand } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { randomUUID } from "node:crypto";
 
 const BUCKET = process.env.S3_BUCKET ?? "research-repo";
@@ -104,6 +104,42 @@ export async function createSource(
   }
 
   return { sourceId: source.id, duplicate: false, status: "pending" };
+}
+
+/**
+ * Delete a source and everything derived from it. Prisma cascades remove its
+ * chunks (→ insight evidence), flow tags, source tags, and jobs; we then drop
+ * any insight left with no evidence, best-effort delete the stored file, and
+ * remove the meeting if it's now empty.
+ */
+export async function deleteSource(id: string): Promise<{ deleted: boolean }> {
+  const source = await prisma.source.findUnique({
+    where: { id },
+    select: { storageKey: true, meetingId: true },
+  });
+  if (!source) return { deleted: false };
+
+  await prisma.source.delete({ where: { id } });
+
+  // Remove insights orphaned by losing their evidence.
+  await prisma.$executeRawUnsafe(
+    `DELETE FROM insights i WHERE NOT EXISTS (SELECT 1 FROM insight_evidence e WHERE e.insight_id = i.id)`,
+  );
+
+  // Best-effort: delete the stored object.
+  try {
+    await s3().send(new DeleteObjectCommand({ Bucket: BUCKET, Key: source.storageKey }));
+  } catch {
+    // ignore (storage may be unconfigured / already gone)
+  }
+
+  // Drop the meeting if it no longer has any files.
+  if (source.meetingId) {
+    const remaining = await prisma.source.count({ where: { meetingId: source.meetingId } });
+    if (remaining === 0) await prisma.meeting.delete({ where: { id: source.meetingId } }).catch(() => {});
+  }
+
+  return { deleted: true };
 }
 
 let _defaultProjectId: string | null = null;

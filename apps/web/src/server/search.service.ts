@@ -23,6 +23,7 @@ export interface SearchResultSource {
   recordedAt: Date | null;
   createdAt: Date;
   score: number;
+  meeting: { id: string; title: string | null } | null;
   flowStages: { id: string; name: string }[];
   snippets: SearchHitSnippet[]; // best matching chunks (for preview + traceability)
 }
@@ -113,6 +114,7 @@ async function hydrate(
         id: true, sourceType: true, status: true, originalName: true,
         canonicalName: true, participant: true, topic: true, sentiment: true,
         recordedAt: true, createdAt: true,
+        meeting: { select: { id: true, title: true } },
         flowTags: { select: { stage: { select: { id: true, name: true } } } },
       },
     }),
@@ -151,6 +153,7 @@ async function hydrate(
         recordedAt: s.recordedAt,
         createdAt: s.createdAt,
         score: scores.get(id) ?? 0,
+        meeting: s.meeting ? { id: s.meeting.id, title: s.meeting.title } : null,
         flowStages: s.flowTags.map((t) => ({ id: t.stage.id, name: t.stage.name })),
         snippets,
       };
