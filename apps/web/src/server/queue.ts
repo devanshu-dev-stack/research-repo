@@ -30,3 +30,40 @@ export async function enqueuePipeline(sourceId: string): Promise<void> {
     console.error(`[pipeline] inline run failed for ${sourceId}:`, err);
   });
 }
+
+export interface DriveSyncTrigger {
+  mode: "queued" | "inline";
+  /** Present only for inline runs (no Redis); the queued worker reports via logs. */
+  created?: number;
+  skipped?: number;
+  meetings?: number;
+  errors?: { file: string; message: string }[];
+}
+
+/**
+ * Kick off a Google Drive sync. With Redis, enqueue a `drive-sync` job (the
+ * worker runs it and enqueues a pipeline job per new source). Without Redis,
+ * run it inline and enqueue each new source's pipeline here.
+ */
+export async function enqueueDriveSync(rootFolderId?: string): Promise<DriveSyncTrigger> {
+  if (process.env.REDIS_URL) {
+    const { getDriveSyncQueue } = await import("./queue.bull");
+    await getDriveSyncQueue().add(
+      "drive-sync",
+      { rootFolderId },
+      { removeOnComplete: 50, removeOnFail: 50 },
+    );
+    return { mode: "queued" };
+  }
+
+  const { syncDrive } = await import("@research-repo/pipeline");
+  const result = await syncDrive({ rootFolderId });
+  for (const id of result.createdSourceIds) await enqueuePipeline(id);
+  return {
+    mode: "inline",
+    created: result.createdSourceIds.length,
+    skipped: result.skipped,
+    meetings: result.meetings,
+    errors: result.errors,
+  };
+}

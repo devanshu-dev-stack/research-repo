@@ -82,9 +82,10 @@ model Project {
 // editable. Insights trace to their meeting via source.
 // ─────────────────────────────────────────────────────────
 model Meeting {
-  id        String  @id @default(uuid()) @db.Uuid
-  projectId String? @map("project_id") @db.Uuid
-  title     String? // AI-generated from content; null until named; user-editable
+  id            String  @id @default(uuid()) @db.Uuid
+  projectId     String? @map("project_id") @db.Uuid
+  title         String? // AI-generated from content; null until named; user-editable
+  driveFolderId String? @unique @map("drive_folder_id") // mirrored Drive subfolder
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -94,6 +95,15 @@ model Meeting {
 
   @@index([projectId])
   @@map("meetings")
+}
+
+// Simple key-value app settings (e.g. drive.rootFolderId, drive.lastSyncedAt).
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
 }
 
 // ─────────────────────────────────────────────────────────
@@ -143,6 +153,7 @@ model Source {
   mimeType       String? @map("mime_type")
   byteSize       BigInt? @map("byte_size")
   checksumSha256 String? @unique @map("checksum_sha256")
+  driveFileId    String? @unique @map("drive_file_id") // Drive origin/mirror; dedup + loop guard
 
   // normalized content
   participant String?

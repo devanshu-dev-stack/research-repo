@@ -10,6 +10,7 @@ import { router, publicProcedure } from "./trpc";
 import { searchRouter } from "./search";
 import { insightsRouter } from "./insights";
 import { meetingsRouter } from "./meetings";
+import { driveRouter } from "./drive";
 
 export const sourcesRouter = router({
   // Batch presign for drag-and-drop / batch uploads.
@@ -101,5 +102,6 @@ export const appRouter = router({
   search: searchRouter,
   insights: insightsRouter,
   meetings: meetingsRouter,
+  drive: driveRouter,
 });
 export type AppRouter = typeof appRouter;

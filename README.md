@@ -15,13 +15,21 @@ providers (**Gemini**, OpenAI, Anthropic, or a no-key local stub).
 ## What happens to a file you upload (the overview)
 
 ```
-  Browser
-    │  1. asks the app for a presigned URL, then PUTs the file straight to storage
-    ▼                                        (bytes are never proxied through the app)
-  MinIO / S3 ──────► sources row created (status: pending) ──────► job queued in Redis
-                                                                          │
-                                                                          ▼
-                                              A background worker runs the pipeline:
+  Two ways in — both land the bytes in storage, then share one pipeline:
+
+  Browser (drag & drop) ── presigned PUT, straight to storage ──┐
+                                                                ▼          (bytes are never
+                                                          MinIO / S3        proxied through
+  Google Drive ── ⟳ Sync ── worker downloads each file ─────────┘          the app server)
+    (mirror a folder; sub-folder → meeting;                     │
+     follows shortcuts, incl. Meet recordings)                  ▼
+                                       sources row created (status: pending)
+                                                                │
+                                                                ▼
+                                                        job queued in Redis
+                                                                │
+                                                                ▼
+                                       A background worker runs the pipeline:
 
    extract ──►  normalize ──►  chunk ──►  embed ──►  classify ──►  insight ──► status: ready
    ───────      ─────────      ─────      ─────      ────────      ───────
@@ -38,6 +46,9 @@ Each stage is **idempotent** and audited in a `processing_jobs` table, so a fail
 or rate-limited run can be safely re-run and it resumes where it left off. A source
 ends as `ready`, or `partial` (usable but a later stage failed) / `failed`.
 
+Files can also be **synced from a Google Drive folder** instead of uploaded by hand
+— same pipeline from the `sources` row onward (see [Syncing from Google Drive](#syncing-from-google-drive)).
+
 Once `ready`, the content is available through **hybrid search** (keyword + semantic
 vectors, fused with Reciprocal Rank Fusion) and the four UI views below.
 
@@ -45,9 +56,12 @@ vectors, fused with Reciprocal Rank Fusion) and the four UI views below.
 
 Open **http://localhost:3000**. Four views, one nav:
 
-- **Repository** — every source with status, type, flow-stage tags, and a snippet.
-  Click a row to open the detail drawer (full metadata, tags, all chunks, and a
-  "Re-run pipeline" button for failed/partial sources).
+- **Repository** — every source with status, type, flow-stage tags, and a snippet,
+  grouped by meeting. A **⟳ Sync from Drive** button mirrors a Google Drive folder
+  (see below). Click a row to open the detail drawer (full metadata, tags, all
+  chunks, a "Re-run pipeline" button for failed/partial sources, and — for
+  Drive-synced files — an **"Open in Google Drive ↗"** link that opens the original
+  in Drive's native viewer).
 - **Insights** — extracted insights as cards (kind, severity, frequency, the
   supporting quote), filterable by kind, each with clickable links back to its
   source(s).
@@ -174,7 +188,60 @@ LLM_PROVIDER=gemini              # gemini | anthropic | local
 LLM_MODEL=gemini-2.5-flash-lite  # gemini default (high free-tier quota)
 GEMINI_API_KEY=...               # one key: embeddings + LLM + transcription
 # TRANSCRIBE_PROVIDER defaults to gemini whenever GEMINI_API_KEY is set
+
+# Optional — Google Drive sync (see "Syncing from Google Drive")
+GOOGLE_DRIVE_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_DRIVE_CLIENT_SECRET=...
+GOOGLE_DRIVE_REFRESH_TOKEN=...   # from `pnpm drive:auth`
+GOOGLE_DRIVE_ROOT_FOLDER_ID=...  # the …/folders/<THIS> id
 ```
+
+---
+
+## Syncing from Google Drive
+
+Instead of (or alongside) uploading by hand, you can **mirror a Google Drive folder**
+into the repository. In the **Repository** view, click **⟳ Sync from Drive**: each
+immediate sub-folder becomes a **meeting**, and every file inside is imported as a
+source and run through the same pipeline. Re-syncing is **idempotent** — already-imported
+files are skipped (deduped by Drive file id *and* content checksum), so you only pick up
+what's new, and no duplicate meetings are created.
+
+- **Shortcuts are followed** to the file they point at — including Google Meet
+  **recordings** (the recording is downloaded and its audio transcribed like any video).
+- **Google-native docs are exported** on the way in: Docs → text, Sheets → CSV,
+  Slides → PDF. Other native types (Forms, Drawings) are skipped.
+- Only the root folder's **immediate sub-folders** are walked (one level deep).
+- Every synced file gets an **"Open in Google Drive ↗"** action (on its row and in the
+  detail drawer) that opens the original in Drive's native viewer — the simplest way to
+  preview media the app doesn't render in-line.
+
+### Connecting Drive (one-time, OAuth — no service-account key)
+
+Google's "Secure by Default" org policy (`iam.disableServiceAccountKeyCreation`) blocks
+service-account JSON keys on most organizations, so the connector authenticates with
+**OAuth user credentials** instead — which is also the natural fit for "connect *your*
+Drive." Scope is **read-only** (`drive.readonly`); the app never writes to Drive.
+
+1. In the [Google Cloud Console](https://console.cloud.google.com): **enable the Google
+   Drive API**, configure the **OAuth consent screen** (choose *Internal* on a Workspace
+   org — no verification, and the refresh token doesn't expire), and create an **OAuth
+   client ID** of type **Desktop app**.
+2. Put the client id/secret + the folder to mirror in your root `.env` (see the
+   cheat-sheet above), leaving `GOOGLE_DRIVE_REFRESH_TOKEN` blank for now.
+3. Mint the refresh token, then paste the printed value into `.env`:
+   ```bash
+   pnpm drive:auth          # opens a consent URL, captures the redirect on localhost
+   ```
+4. Restart so the app + worker pick up the token, then click **⟳ Sync from Drive**:
+   ```bash
+   docker compose --env-file .env -f infra/docker-compose.yml up -d --build web worker
+   ```
+
+Nothing sensitive leaves your machine during setup — the OAuth code↔token exchange
+round-trips over a localhost loopback. With Redis present the sync runs as a background
+`drive-sync` job on the worker (which has `ffmpeg` for recording transcription); without
+Redis it runs inline.
 
 ---
 
@@ -184,7 +251,7 @@ GEMINI_API_KEY=...               # one key: embeddings + LLM + transcription
 |---|---|
 | `apps/web` | Next.js UI (4 views) + tRPC API + presigned uploads |
 | `workers` | BullMQ consumer that runs the pipeline (has `ffmpeg` for transcription) |
-| `packages/pipeline` | The stages: extract → normalize → chunk → embed → classify → insight |
+| `packages/pipeline` | The stages: extract → normalize → chunk → embed → classify → insight; plus the **Google Drive connector** (`src/drive/`) |
 | `packages/ai` | Provider adapters (Gemini / OpenAI / Anthropic / local) + the rate-limited Gemini client |
 | `packages/db` | Prisma schema, migrations, pgvector + hybrid-search SQL |
 | `packages/core` | Pure logic: naming, chunking, zod schemas, RRF fusion |

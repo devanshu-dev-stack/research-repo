@@ -4,6 +4,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { pillColor, cardStyle } from "./ui";
 import { UploadModal } from "./UploadModal";
+import { DriveSyncControl } from "./DriveSyncControl";
 
 type Src = {
   id: string;
@@ -11,6 +12,7 @@ type Src = {
   sourceType: string;
   originalName: string;
   canonicalName: string | null;
+  driveFileId: string | null;
   topic: string | null;
   sentiment: string | null;
   meeting: { id: string; title: string | null } | null;
@@ -75,12 +77,15 @@ export function RepositoryView({ onOpenSource }: { onOpenSource: (id: string) =>
             {search.isLoading ? "Loading…" : `${sources.length} files in ${groups.length} group${groups.length === 1 ? "" : "s"}`} · grouped by meeting
           </div>
         </div>
-        <button
-          onClick={() => setShowUpload(true)}
-          style={{ background: "var(--orange)", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, fontSize: 14 }}
-        >
-          + Upload
-        </button>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+          <DriveSyncControl onSynced={() => utils.search.query.invalidate()} />
+          <button
+            onClick={() => setShowUpload(true)}
+            style={{ background: "var(--orange)", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, fontSize: 14 }}
+          >
+            + Upload
+          </button>
+        </div>
       </header>
 
       <input
@@ -136,13 +141,27 @@ export function RepositoryView({ onOpenSource }: { onOpenSource: (id: string) =>
                         </div>
                       )}
                     </div>
-                    <button
-                      onClick={(e) => remove(e, s)}
-                      title="Remove this file"
-                      style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 14, flexShrink: 0, padding: "2px 4px" }}
-                    >
-                      🗑
-                    </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+                      {s.driveFileId && (
+                        <a
+                          href={`https://drive.google.com/open?id=${s.driveFileId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Preview the original in Google Drive"
+                          style={{ color: "var(--blue)", fontSize: 12.5, textDecoration: "none", padding: "2px 6px", whiteSpace: "nowrap" }}
+                        >
+                          Preview ↗
+                        </a>
+                      )}
+                      <button
+                        onClick={(e) => remove(e, s)}
+                        title="Remove this file"
+                        style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 14, padding: "2px 4px" }}
+                      >
+                        🗑
+                      </button>
+                    </div>
                   </div>
                 ))}
             </div>

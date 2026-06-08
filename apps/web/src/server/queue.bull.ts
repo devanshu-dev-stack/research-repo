@@ -13,3 +13,8 @@ export function getRedisConnection(): IORedis {
 export function getPipelineQueue(): Queue {
   return (_queue ??= new Queue("pipeline", { connection: getRedisConnection() }));
 }
+
+let _driveQueue: Queue | null = null;
+export function getDriveSyncQueue(): Queue {
+  return (_driveQueue ??= new Queue("drive-sync", { connection: getRedisConnection() }));
+}

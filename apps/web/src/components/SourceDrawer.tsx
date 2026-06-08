@@ -37,15 +37,29 @@ export function SourceDrawer({ id, onClose }: { id: string; onClose: () => void 
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, color: "var(--muted)" }}>
             ✕
           </button>
-          {s && ["failed", "partial"].includes(s.status) && (
-            <button
-              onClick={() => retry.mutate({ id })}
-              disabled={retry.isPending}
-              style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 13 }}
-            >
-              {retry.isPending ? "Re-queuing…" : "↻ Re-run pipeline"}
-            </button>
-          )}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {s?.driveFileId && (
+              // Synced from Drive — open the original in Drive, which previews it
+              // natively (video player, Doc/Sheet viewer) far better than we can.
+              <a
+                href={`https://drive.google.com/open?id=${s.driveFileId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ background: "#fff", color: "var(--navy)", border: "1px solid var(--line)", borderRadius: 8, padding: "7px 14px", fontSize: 13, fontWeight: 600, textDecoration: "none" }}
+              >
+                Open in Google Drive ↗
+              </a>
+            )}
+            {s && ["failed", "partial"].includes(s.status) && (
+              <button
+                onClick={() => retry.mutate({ id })}
+                disabled={retry.isPending}
+                style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 13 }}
+              >
+                {retry.isPending ? "Re-queuing…" : "↻ Re-run pipeline"}
+              </button>
+            )}
+          </div>
         </div>
 
         {!s && <div style={{ color: "var(--muted)" }}>Loading…</div>}

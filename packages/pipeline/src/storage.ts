@@ -61,6 +61,18 @@ export async function presignGet(key: string): Promise<string> {
   });
 }
 
+/** Write bytes to storage at `key` (used by the Drive connector, which fetches
+ *  file contents server-side rather than via a browser presigned PUT). */
+export async function putObjectBytes(
+  key: string,
+  bytes: Buffer,
+  contentType?: string,
+): Promise<void> {
+  await s3().send(
+    new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: bytes, ContentType: contentType }),
+  );
+}
+
 /** Pull an object's bytes for processing (extract/normalize stages). */
 export async function getObjectBytes(key: string): Promise<Buffer> {
   const res = await s3().send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));

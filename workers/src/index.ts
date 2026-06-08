@@ -1,6 +1,6 @@
-import { Worker } from "bullmq";
+import { Queue, Worker } from "bullmq";
 import IORedis from "ioredis";
-import { runPipeline, nameMeetingForSource } from "@research-repo/pipeline";
+import { runPipeline, nameMeetingForSource, syncDrive } from "@research-repo/pipeline";
 
 const connection = new IORedis(process.env.REDIS_URL!, {
   maxRetriesPerRequest: null,
@@ -30,4 +30,40 @@ worker.on("failed", (job, err) => {
   console.error(`[worker] pipeline failed for ${job?.data?.sourceId}:`, err.message);
 });
 
-console.log("[worker] pipeline worker started");
+// Drive sync: mirror the configured folder, then enqueue a pipeline job per new
+// source. Concurrency 1 so two syncs never race over the same files.
+const pipelineQueue = new Queue("pipeline", { connection });
+const driveWorker = new Worker(
+  "drive-sync",
+  async (job) => {
+    const { rootFolderId } = (job.data ?? {}) as { rootFolderId?: string };
+    const result = await syncDrive({ rootFolderId });
+    for (const sourceId of result.createdSourceIds) {
+      await pipelineQueue.add(
+        "pipeline",
+        { sourceId },
+        {
+          jobId: sourceId,
+          attempts: 3,
+          backoff: { type: "exponential", delay: 2000 },
+          removeOnComplete: 1000,
+          removeOnFail: 5000,
+        },
+      );
+    }
+    return result;
+  },
+  { connection, concurrency: 1 },
+);
+
+driveWorker.on("completed", (job, result) => {
+  console.log(
+    `[worker] drive-sync done: ${result?.createdSourceIds?.length ?? 0} new, ` +
+      `${result?.skipped ?? 0} skipped, ${result?.errors?.length ?? 0} errors`,
+  );
+});
+driveWorker.on("failed", (_job, err) => {
+  console.error(`[worker] drive-sync failed:`, err.message);
+});
+
+console.log("[worker] pipeline + drive-sync workers started");

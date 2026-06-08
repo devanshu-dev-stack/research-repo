@@ -10,7 +10,8 @@
     "db:generate": "pnpm --filter @research-repo/db generate",
     "db:migrate": "pnpm --filter @research-repo/db migrate:deploy",
     "db:seed": "pnpm --filter @research-repo/db seed",
-    "worker": "pnpm --filter @research-repo/workers start"
+    "worker": "pnpm --filter @research-repo/workers start",
+    "drive:auth": "pnpm --filter @research-repo/pipeline drive:auth"
   },
   "devDependencies": {
     "turbo": "^2.3.0",

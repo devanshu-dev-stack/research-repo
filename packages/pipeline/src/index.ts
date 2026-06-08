@@ -92,3 +92,5 @@ export async function runPipeline(sourceId: string): Promise<void> {
 
 export { runExtract, runNormalize, runChunk, runEmbed, runClassify, runInsight };
 export { nameMeetingFromSources, nameMeetingForSource } from "./meeting";
+export { syncDrive, type DriveSyncResult } from "./drive/sync";
+export { isDriveConfigured } from "./drive/client";

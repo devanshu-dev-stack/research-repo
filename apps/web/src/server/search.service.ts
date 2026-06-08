@@ -17,6 +17,7 @@ export interface SearchResultSource {
   status: string;
   originalName: string;
   canonicalName: string | null;
+  driveFileId: string | null;
   participant: string | null;
   topic: string | null;
   sentiment: string | null;
@@ -112,7 +113,7 @@ async function hydrate(
       where: { id: { in: sourceIds } },
       select: {
         id: true, sourceType: true, status: true, originalName: true,
-        canonicalName: true, participant: true, topic: true, sentiment: true,
+        canonicalName: true, driveFileId: true, participant: true, topic: true, sentiment: true,
         recordedAt: true, createdAt: true,
         meeting: { select: { id: true, title: true } },
         flowTags: { select: { stage: { select: { id: true, name: true } } } },
@@ -147,6 +148,7 @@ async function hydrate(
         status: s.status,
         originalName: s.originalName,
         canonicalName: s.canonicalName,
+        driveFileId: s.driveFileId,
         participant: s.participant,
         topic: s.topic,
         sentiment: s.sentiment,
