@@ -5,7 +5,7 @@
 
 import { spawn } from "node:child_process";
 import type { ChunkInput } from "@research-repo/core";
-import { hasGeminiKey, geminiKeyCount, pickGeminiKey, coolDownKey } from "@research-repo/ai";
+import { hasGeminiKey, geminiKey } from "@research-repo/ai";
 
 export interface ExtractResult {
   content: string;
@@ -58,15 +58,6 @@ export class DeepgramTranscriber implements Transcriber {
 const GEMINI_BASE = "https://generativelanguage.googleapis.com";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Thrown on a 429 so the transcriber can rotate to the next key. An upload URL
-// is bound to the key that started it, so a whole transcription uses ONE key and
-// we retry the entire flow (re-upload) with the next key on quota exhaustion.
-class Quota429 extends Error {
-  constructor(public perDay: boolean, msg: string) {
-    super(msg);
-  }
-}
-
 export class GeminiTranscriber implements Transcriber {
   private model =
     process.env.GEMINI_TRANSCRIBE_MODEL || process.env.LLM_MODEL || "gemini-2.5-flash-lite";
@@ -83,24 +74,11 @@ export class GeminiTranscriber implements Transcriber {
       "distinguishable speakers as 'Speaker 1:', 'Speaker 2:', etc. Output ONLY the " +
       "transcript text — no preamble, summary, or commentary.";
 
-    let lastErr: unknown = null;
-    for (let i = 0; i < Math.max(1, geminiKeyCount()); i++) {
-      const key = pickGeminiKey();
-      if (!key) break;
-      try {
-        const fileUri = await this.uploadFile(audio, "audio/mpeg", key);
-        const text = await this.generate(fileUri, "audio/mpeg", prompt, key);
-        return parseTimestampedTranscript(text);
-      } catch (e) {
-        lastErr = e;
-        if (e instanceof Quota429) {
-          coolDownKey(key, e.perDay); // bench this key, try the next
-          continue;
-        }
-        throw e;
-      }
-    }
-    throw lastErr instanceof Error ? lastErr : new Error("Gemini transcription: all keys exhausted");
+    const key = geminiKey();
+    if (!key) throw new Error("GEMINI_API_KEY not set");
+    const fileUri = await this.uploadFile(audio, "audio/mpeg", key);
+    const text = await this.generate(fileUri, "audio/mpeg", prompt, key);
+    return parseTimestampedTranscript(text);
   }
 
   // Resumable File API upload → returns the file URI once the file is ACTIVE.
@@ -117,7 +95,6 @@ export class GeminiTranscriber implements Transcriber {
       },
       body: JSON.stringify({ file: { display_name: "transcription-audio" } }),
     });
-    if (start.status === 429) throw new Quota429(false, await start.text());
     if (!start.ok) throw new Error(`Gemini file start ${start.status}: ${await start.text()}`);
     const uploadUrl = start.headers.get("x-goog-upload-url");
     if (!uploadUrl) throw new Error("Gemini file upload URL missing from start response");
@@ -160,10 +137,6 @@ export class GeminiTranscriber implements Transcriber {
         generationConfig: { maxOutputTokens: 32768, thinkingConfig: { thinkingBudget: 0 } },
       }),
     });
-    if (res.status === 429) {
-      const body = await res.text();
-      throw new Quota429(/PerDay/i.test(body), `Gemini transcribe 429: ${body}`);
-    }
     if (!res.ok) throw new Error(`Gemini transcribe ${res.status}: ${await res.text()}`);
     const data = (await res.json()) as any;
     return data.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "";

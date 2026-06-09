@@ -33,7 +33,7 @@ const THINKING_BUDGET = Number(process.env.GEMINI_THINKING_BUDGET ?? 0);
 
 export class GeminiEmbedProvider implements EmbedProvider {
   constructor() {
-    if (!hasGeminiKey()) throw new Error("GEMINI_API_KEY(S) not set");
+    if (!hasGeminiKey()) throw new Error("GEMINI_API_KEY not set");
   }
 
   async embed(texts: string[]): Promise<number[][]> {
@@ -73,7 +73,7 @@ export class GeminiEmbedProvider implements EmbedProvider {
 // application/json so the model returns parseable JSON without fences.
 export class GeminiLLMProvider implements LLMProvider {
   constructor() {
-    if (!hasGeminiKey()) throw new Error("GEMINI_API_KEY(S) not set");
+    if (!hasGeminiKey()) throw new Error("GEMINI_API_KEY not set");
   }
 
   private async call(
