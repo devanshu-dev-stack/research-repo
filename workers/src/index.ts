@@ -4,7 +4,7 @@ import {
   runPipeline,
   nameMeetingForSource,
   syncDrive,
-  findUnfinishedSourceIds,
+  markSourceUnprocessed,
 } from "@research-repo/pipeline";
 
 const connection = new IORedis(process.env.REDIS_URL!, {
@@ -31,8 +31,17 @@ const worker = new Worker(
 worker.on("completed", (job) => {
   console.log(`[worker] pipeline completed for ${job.data.sourceId}`);
 });
-worker.on("failed", (job, err) => {
-  console.error(`[worker] pipeline failed for ${job?.data?.sourceId}:`, err.message);
+// A failed pipeline run is auto-retried by the queue (attempts below). This event
+// fires on every attempt; once the last one is exhausted, record a plain
+// "not processed" message so the UI stops implying it'll keep trying.
+worker.on("failed", async (job, err) => {
+  const sourceId = job?.data?.sourceId;
+  console.error(`[worker] pipeline failed for ${sourceId}:`, err.message);
+  const attempts = job?.opts?.attempts ?? 1;
+  if (sourceId && (job?.attemptsMade ?? 0) >= attempts) {
+    await markSourceUnprocessed(sourceId, attempts);
+    console.error(`[worker] giving up on ${sourceId} after ${attempts} attempts`);
+  }
 });
 
 // Drive sync: mirror the configured folder, then enqueue a pipeline job per new
@@ -58,7 +67,7 @@ async function enqueuePipelineJob(sourceId: string): Promise<void> {
     { sourceId },
     {
       jobId: sourceId,
-      attempts: 3,
+      attempts: Number(process.env.PIPELINE_ATTEMPTS ?? 3), // auto-retry, then "not processed"
       backoff: { type: "exponential", delay: 2000 },
       removeOnComplete: 1000,
       removeOnFail: 5000,
@@ -115,45 +124,4 @@ if (DRIVE_SYNC_INTERVAL_MIN > 0) {
   );
 }
 
-// Auto-reprocess: periodically re-enqueue sources stuck in failed/partial so
-// transient failures (a flaky API call, a prior quota wall) self-heal. A source
-// that has already failed REPROCESS_MAX_ATTEMPTS times is left alone so a
-// genuinely broken file isn't retried forever. Idempotent stages mean a re-run
-// only does the work still missing (embed/tag/insight). 0 interval = off.
-const REPROCESS_INTERVAL_MIN = Number(process.env.REPROCESS_INTERVAL_MIN ?? 0);
-const REPROCESS_MAX_ATTEMPTS = Number(process.env.REPROCESS_MAX_ATTEMPTS ?? 3);
-const reprocessQueue = new Queue("reprocess", { connection });
-const reprocessWorker = new Worker(
-  "reprocess",
-  async () => {
-    const ids = await findUnfinishedSourceIds(REPROCESS_MAX_ATTEMPTS);
-    for (const sourceId of ids) {
-      await enqueuePipelineJob(sourceId);
-    }
-    return { requeued: ids.length };
-  },
-  { connection, concurrency: 1 },
-);
-reprocessWorker.on("completed", (_job, result) => {
-  if (result?.requeued) console.log(`[worker] reprocess re-queued ${result.requeued} source(s)`);
-});
-reprocessWorker.on("failed", (_job, err) => {
-  console.error(`[worker] reprocess failed:`, err.message);
-});
-
-if (REPROCESS_INTERVAL_MIN > 0) {
-  for (const j of await reprocessQueue.getRepeatableJobs()) {
-    await reprocessQueue.removeRepeatableByKey(j.key);
-  }
-  await reprocessQueue.add(
-    "reprocess-scheduled",
-    {},
-    { repeat: { every: REPROCESS_INTERVAL_MIN * 60_000 }, removeOnComplete: 50, removeOnFail: 50 },
-  );
-  console.log(
-    `[worker] auto-reprocess every ${REPROCESS_INTERVAL_MIN}m ` +
-      `(max ${REPROCESS_MAX_ATTEMPTS} attempts per source)`,
-  );
-}
-
-console.log("[worker] pipeline + drive-sync + reprocess workers started");
+console.log("[worker] pipeline + drive-sync workers started");

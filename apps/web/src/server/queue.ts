@@ -21,7 +21,7 @@ export async function enqueuePipeline(sourceId: string): Promise<void> {
       { sourceId },
       {
         jobId: sourceId, // dedupe: one in-flight pipeline per source
-        attempts: 3,
+        attempts: Number(process.env.PIPELINE_ATTEMPTS ?? 3), // auto-retry, then "not processed"
         backoff: { type: "exponential", delay: 2000 },
         removeOnComplete: 1000,
         removeOnFail: 5000,

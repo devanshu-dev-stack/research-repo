@@ -18,9 +18,6 @@ export function SourceDrawer({ id, onClose }: { id: string; onClose: () => void 
     // keep polling while it's still processing
     q.state.data && ["pending", "processing"].includes((q.state.data as any).status) ? 3000 : false,
   });
-  const retry = trpc.sources.retryStage.useMutation({
-    onSuccess: () => utils.sources.get.invalidate({ id }),
-  });
 
   const s = src.data as any;
 
@@ -49,15 +46,6 @@ export function SourceDrawer({ id, onClose }: { id: string; onClose: () => void 
               >
                 Open in Google Drive ↗
               </a>
-            )}
-            {s && ["failed", "partial"].includes(s.status) && (
-              <button
-                onClick={() => retry.mutate({ id })}
-                disabled={retry.isPending}
-                style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 13 }}
-              >
-                {retry.isPending ? "Re-queuing…" : "↻ Re-run pipeline"}
-              </button>
             )}
           </div>
         </div>

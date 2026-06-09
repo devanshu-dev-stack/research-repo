@@ -91,28 +91,17 @@ export async function runPipeline(sourceId: string): Promise<void> {
 }
 
 /**
- * Source ids stuck in `partial` or `failed` that are worth re-running. Stages
- * are idempotent, so re-running embeds only the chunks still missing a vector,
- * re-tags, and re-extracts insights — partial sources finish, failed ones retry
- * from extract. `maxAttempts > 0` skips sources that have already failed that
- * many times (don't hammer a genuinely broken file); 0 = no cap (manual retry).
+ * Final-failure message. The pipeline auto-retries a source a few times (the
+ * queue's per-job attempts); once those are exhausted the worker calls this so
+ * the UI shows a plain "not processed" line instead of a raw stack/error.
  */
-export async function findUnfinishedSourceIds(maxAttempts = 0): Promise<string[]> {
-  const sources = await prisma.source.findMany({
-    where: { status: { in: ["partial", "failed"] } },
-    select: { id: true },
-    orderBy: { createdAt: "asc" },
-  });
-  if (maxAttempts <= 0) return sources.map((s) => s.id);
-  const out: string[] = [];
-  for (const s of sources) {
-    // One failed ProcessingJob row per failed run → count = prior attempts.
-    const fails = await prisma.processingJob.count({
-      where: { sourceId: s.id, status: "failed" },
-    });
-    if (fails < maxAttempts) out.push(s.id);
-  }
-  return out;
+export async function markSourceUnprocessed(sourceId: string, attempts: number): Promise<void> {
+  await prisma.source
+    .update({
+      where: { id: sourceId },
+      data: { error: `File not processed — gave up after ${attempts} attempt${attempts === 1 ? "" : "s"}.` },
+    })
+    .catch(() => {});
 }
 
 export { runExtract, runNormalize, runChunk, runEmbed, runClassify, runInsight };
