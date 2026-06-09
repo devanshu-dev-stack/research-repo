@@ -2,9 +2,16 @@ import type { CSSProperties, ReactNode } from "react";
 
 export function pillColor(status: string): string {
   if (status === "ready") return "#1a7a3a";
-  if (status === "failed") return "#c2304a";
+  if (status === "failed") return "#7c7766"; // "unprocessed" — neutral, not an error
   if (status === "partial") return "#b8860b";
   return "#0382ED";
+}
+
+// User-facing status word. The DB keeps "failed", but to the team a file the
+// pipeline couldn't turn into searchable content just reads as unprocessed.
+export function statusLabel(status: string): string {
+  if (status === "failed") return "unprocessed";
+  return status;
 }
 
 // Insight kind → display label + accent color (mapped onto the brand palette).

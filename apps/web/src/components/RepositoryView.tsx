@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { pillColor, cardStyle } from "./ui";
+import { pillColor, statusLabel, cardStyle } from "./ui";
 import { UploadModal } from "./UploadModal";
 import { DriveSyncControl } from "./DriveSyncControl";
 
@@ -129,7 +129,7 @@ export function RepositoryView({ onOpenSource }: { onOpenSource: (id: string) =>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                         <strong style={{ fontSize: 13.5 }}>{s.topic || s.originalName}</strong>
-                        <span style={{ fontSize: 11, color: pillColor(s.status), fontWeight: 600 }} title={statusHelp(s.status)}>{s.status}</span>
+                        <span style={{ fontSize: 11, color: pillColor(s.status), fontWeight: 600 }} title={statusHelp(s.status)}>{statusLabel(s.status)}</span>
                       </div>
                       <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
                         {s.canonicalName || s.originalName} · {s.sourceType}

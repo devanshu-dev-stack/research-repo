@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { Chip, pillColor } from "./ui";
+import { Chip, pillColor, statusLabel } from "./ui";
 
 export function SourceDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const utils = trpc.useUtils();
@@ -56,7 +56,7 @@ export function SourceDrawer({ id, onClose }: { id: string; onClose: () => void 
           <>
             <h2 style={{ fontSize: 24 }}>{s.topic || s.originalName}</h2>
             <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ color: pillColor(s.status), fontWeight: 600 }}>{s.status}</span>
+              <span style={{ color: pillColor(s.status), fontWeight: 600 }}>{statusLabel(s.status)}</span>
               <span>· {s.sourceType}</span>
               {s.participant && <span>· {s.participant}</span>}
               {s.sentiment && <span>· {s.sentiment}</span>}
@@ -117,6 +117,11 @@ export function SourceDrawer({ id, onClose }: { id: string; onClose: () => void 
 
             <div style={{ marginTop: 20 }}>
               <SectionLabel>{s.chunks?.length ?? 0} chunks</SectionLabel>
+              {(s.chunks?.length ?? 0) === 0 && (
+                <div style={{ fontSize: 13, color: "var(--muted)", background: "#fff", border: "1px dashed var(--line)", borderRadius: 8, padding: "12px 14px" }}>
+                  This file hasn’t been processed, so there’s no extracted content to preview. Re-upload it to try again.
+                </div>
+              )}
               <div style={{ display: "grid", gap: 8 }}>
                 {(s.chunks ?? []).map((c: any) => (
                   <div key={c.id} style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 8, padding: "10px 12px" }}>
