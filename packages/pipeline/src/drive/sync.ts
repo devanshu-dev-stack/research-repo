@@ -19,6 +19,7 @@ export interface DriveSyncResult {
   rootFolderId: string;
   createdSourceIds: string[]; // newly ingested — caller enqueues the pipeline
   skipped: number; // already synced (loop guard) or content duplicate
+  deferred: number; // too recently modified to be considered settled (minAgeMs)
   errors: { file: string; message: string }[];
   meetings: number; // meetings created or matched this run
 }
@@ -44,9 +45,15 @@ const sanitizeName = (n: string) => n.replace(/[\\/:*?"<>|]+/g, "-").trim() || "
  * Idempotent: files already imported (by driveFileId) or whose content matches
  * an existing source (by checksum) are skipped, so re-running only picks up
  * what's new. Only the root's immediate subfolders are walked (one level deep).
+ *
+ * `minAgeMs` (settle window): files whose modifiedTime is more recent than that
+ * are DEFERRED — left untouched this run and picked up by a later sync once they
+ * stop changing. Auto-sync sets this so a still-uploading file (or a Meet
+ * recording Drive is still finalizing) isn't downloaded mid-write. Manual syncs
+ * omit it (0) and ingest immediately.
  */
 export async function syncDrive(
-  opts: { rootFolderId?: string; projectId?: string } = {},
+  opts: { rootFolderId?: string; projectId?: string; minAgeMs?: number } = {},
 ): Promise<DriveSyncResult> {
   if (!isDriveConfigured()) {
     throw new Error(
@@ -60,27 +67,41 @@ export async function syncDrive(
     rootFolderId,
     createdSourceIds: [],
     skipped: 0,
+    deferred: 0,
     errors: [],
     meetings: 0,
   };
+
+  // Settle gate: a file modified more recently than minAgeMs ago is still
+  // "warm" (maybe mid-upload) — defer it to a later run. No timestamp → treat
+  // as settled rather than blocking forever.
+  const cutoff = Date.now() - (opts.minAgeMs ?? 0);
+  const isSettled = (f: DriveFile) =>
+    !opts.minAgeMs || !f.modifiedTime || new Date(f.modifiedTime).getTime() <= cutoff;
 
   const children = await listChildren(drive, rootFolderId);
   const subfolders = children.filter((c) => c.mimeType === FOLDER_MIME);
   const looseFiles = children.filter((c) => c.mimeType !== FOLDER_MIME);
 
   // Loose files directly under root → one meeting bound to the root folder.
-  if (looseFiles.length > 0) {
+  const looseReady = looseFiles.filter(isSettled);
+  result.deferred += looseFiles.length - looseReady.length;
+  if (looseReady.length > 0) {
     const meetingId = await upsertMeeting(projectId, rootFolderId, await folderName(drive, rootFolderId));
     result.meetings++;
-    for (const f of looseFiles) await ingestFile(drive, projectId, meetingId, f, result);
+    for (const f of looseReady) await ingestFile(drive, projectId, meetingId, f, result);
   }
 
-  // Each immediate subfolder → its own meeting.
+  // Each immediate subfolder → its own meeting. Defer warm files; skip creating
+  // the meeting until at least one of its files has settled.
   for (const sf of subfolders) {
+    const files = (await listChildren(drive, sf.id)).filter((c) => c.mimeType !== FOLDER_MIME);
+    const ready = files.filter(isSettled);
+    result.deferred += files.length - ready.length;
+    if (ready.length === 0) continue;
     const meetingId = await upsertMeeting(projectId, sf.id, sf.name);
     result.meetings++;
-    const files = (await listChildren(drive, sf.id)).filter((c) => c.mimeType !== FOLDER_MIME);
-    for (const f of files) await ingestFile(drive, projectId, meetingId, f, result);
+    for (const f of ready) await ingestFile(drive, projectId, meetingId, f, result);
   }
 
   const now = new Date().toISOString();

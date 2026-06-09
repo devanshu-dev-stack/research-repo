@@ -48,9 +48,10 @@ export interface DriveSyncTrigger {
 export async function enqueueDriveSync(rootFolderId?: string): Promise<DriveSyncTrigger> {
   if (process.env.REDIS_URL) {
     const { getDriveSyncQueue } = await import("./queue.bull");
+    // manual: ingest immediately (skip the auto-sync settle window).
     await getDriveSyncQueue().add(
       "drive-sync",
-      { rootFolderId },
+      { rootFolderId, manual: true },
       { removeOnComplete: 50, removeOnFail: 50 },
     );
     return { mode: "queued" };
