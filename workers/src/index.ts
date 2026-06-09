@@ -46,6 +46,25 @@ worker.on("failed", (job, err) => {
 const DRIVE_SYNC_MIN_AGE_MIN = Number(process.env.DRIVE_SYNC_MIN_AGE_MIN ?? 15);
 const pipelineQueue = new Queue("pipeline", { connection });
 const driveSyncQueue = new Queue("drive-sync", { connection });
+
+// Enqueue a pipeline run for a source. jobId = sourceId dedupes in-flight runs,
+// but BullMQ keeps that id reserved for a RETAINED finished job (removeOnFail),
+// so a re-run would be silently dropped. Remove the prior finished job first; if
+// it's currently active, remove() throws and the dedup correctly wins.
+async function enqueuePipelineJob(sourceId: string): Promise<void> {
+  await pipelineQueue.remove(sourceId).catch(() => {});
+  await pipelineQueue.add(
+    "pipeline",
+    { sourceId },
+    {
+      jobId: sourceId,
+      attempts: 3,
+      backoff: { type: "exponential", delay: 2000 },
+      removeOnComplete: 1000,
+      removeOnFail: 5000,
+    },
+  );
+}
 const driveWorker = new Worker(
   "drive-sync",
   async (job) => {
@@ -56,17 +75,7 @@ const driveWorker = new Worker(
     const minAgeMs = manual ? 0 : DRIVE_SYNC_MIN_AGE_MIN * 60_000;
     const result = await syncDrive({ rootFolderId, minAgeMs });
     for (const sourceId of result.createdSourceIds) {
-      await pipelineQueue.add(
-        "pipeline",
-        { sourceId },
-        {
-          jobId: sourceId,
-          attempts: 3,
-          backoff: { type: "exponential", delay: 2000 },
-          removeOnComplete: 1000,
-          removeOnFail: 5000,
-        },
-      );
+      await enqueuePipelineJob(sourceId);
     }
     return result;
   },
@@ -119,17 +128,7 @@ const reprocessWorker = new Worker(
   async () => {
     const ids = await findUnfinishedSourceIds(REPROCESS_MAX_ATTEMPTS);
     for (const sourceId of ids) {
-      await pipelineQueue.add(
-        "pipeline",
-        { sourceId },
-        {
-          jobId: sourceId, // dedupe with any in-flight pipeline for this source
-          attempts: 3,
-          backoff: { type: "exponential", delay: 2000 },
-          removeOnComplete: 1000,
-          removeOnFail: 5000,
-        },
-      );
+      await enqueuePipelineJob(sourceId);
     }
     return { requeued: ids.length };
   },

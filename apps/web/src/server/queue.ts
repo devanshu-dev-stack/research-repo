@@ -11,6 +11,11 @@ export async function enqueuePipeline(sourceId: string): Promise<void> {
   if (process.env.REDIS_URL) {
     const { getPipelineQueue } = await import("./queue.bull");
     const queue = getPipelineQueue();
+    // jobId = sourceId dedupes in-flight runs, but BullMQ also keeps that id
+    // reserved for a RETAINED finished job (removeOnFail below) — so a re-run
+    // (retry / reprocess) would be silently dropped. Drop the prior finished job
+    // first; if it's currently active, remove() throws and dedup correctly wins.
+    await queue.remove(sourceId).catch(() => {});
     await queue.add(
       "pipeline",
       { sourceId },
