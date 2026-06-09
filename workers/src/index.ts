@@ -1,6 +1,11 @@
 import { Queue, Worker } from "bullmq";
 import IORedis from "ioredis";
-import { runPipeline, nameMeetingForSource, syncDrive } from "@research-repo/pipeline";
+import {
+  runPipeline,
+  nameMeetingForSource,
+  syncDrive,
+  findUnfinishedSourceIds,
+} from "@research-repo/pipeline";
 
 const connection = new IORedis(process.env.REDIS_URL!, {
   maxRetriesPerRequest: null,
@@ -101,4 +106,55 @@ if (DRIVE_SYNC_INTERVAL_MIN > 0) {
   );
 }
 
-console.log("[worker] pipeline + drive-sync workers started");
+// Auto-reprocess: periodically re-enqueue sources stuck in failed/partial so
+// transient failures (a flaky API call, a prior quota wall) self-heal. A source
+// that has already failed REPROCESS_MAX_ATTEMPTS times is left alone so a
+// genuinely broken file isn't retried forever. Idempotent stages mean a re-run
+// only does the work still missing (embed/tag/insight). 0 interval = off.
+const REPROCESS_INTERVAL_MIN = Number(process.env.REPROCESS_INTERVAL_MIN ?? 0);
+const REPROCESS_MAX_ATTEMPTS = Number(process.env.REPROCESS_MAX_ATTEMPTS ?? 3);
+const reprocessQueue = new Queue("reprocess", { connection });
+const reprocessWorker = new Worker(
+  "reprocess",
+  async () => {
+    const ids = await findUnfinishedSourceIds(REPROCESS_MAX_ATTEMPTS);
+    for (const sourceId of ids) {
+      await pipelineQueue.add(
+        "pipeline",
+        { sourceId },
+        {
+          jobId: sourceId, // dedupe with any in-flight pipeline for this source
+          attempts: 3,
+          backoff: { type: "exponential", delay: 2000 },
+          removeOnComplete: 1000,
+          removeOnFail: 5000,
+        },
+      );
+    }
+    return { requeued: ids.length };
+  },
+  { connection, concurrency: 1 },
+);
+reprocessWorker.on("completed", (_job, result) => {
+  if (result?.requeued) console.log(`[worker] reprocess re-queued ${result.requeued} source(s)`);
+});
+reprocessWorker.on("failed", (_job, err) => {
+  console.error(`[worker] reprocess failed:`, err.message);
+});
+
+if (REPROCESS_INTERVAL_MIN > 0) {
+  for (const j of await reprocessQueue.getRepeatableJobs()) {
+    await reprocessQueue.removeRepeatableByKey(j.key);
+  }
+  await reprocessQueue.add(
+    "reprocess-scheduled",
+    {},
+    { repeat: { every: REPROCESS_INTERVAL_MIN * 60_000 }, removeOnComplete: 50, removeOnFail: 50 },
+  );
+  console.log(
+    `[worker] auto-reprocess every ${REPROCESS_INTERVAL_MIN}m ` +
+      `(max ${REPROCESS_MAX_ATTEMPTS} attempts per source)`,
+  );
+}
+
+console.log("[worker] pipeline + drive-sync + reprocess workers started");

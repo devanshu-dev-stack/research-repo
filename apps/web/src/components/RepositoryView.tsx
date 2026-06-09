@@ -34,8 +34,12 @@ export function RepositoryView({ onOpenSource }: { onOpenSource: (id: string) =>
   const del = trpc.sources.delete.useMutation({
     onSuccess: () => utils.search.query.invalidate(),
   });
+  const reprocess = trpc.sources.reprocessUnfinished.useMutation({
+    onSuccess: () => utils.search.query.invalidate(),
+  });
 
   const sources = (search.data?.sources ?? []) as Src[];
+  const stuckCount = sources.filter((s) => s.status === "failed" || s.status === "partial").length;
 
   // Group files under their meeting (preserving recency order); loose files last.
   const groups: { key: string; title: string; items: Src[] }[] = [];
@@ -78,6 +82,20 @@ export function RepositoryView({ onOpenSource }: { onOpenSource: (id: string) =>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+          {stuckCount > 0 && (
+            <button
+              onClick={() => reprocess.mutate()}
+              disabled={reprocess.isPending}
+              title="Re-run embedding, tagging, and insight extraction for every file that failed or only partly finished"
+              style={{ background: "#fff", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: "10px 14px", fontWeight: 600, fontSize: 14, cursor: reprocess.isPending ? "default" : "pointer" }}
+            >
+              {reprocess.isPending
+                ? "Re-queuing…"
+                : reprocess.isSuccess
+                  ? `↻ Re-queued ${reprocess.data?.queued ?? 0}`
+                  : `↻ Retry failed & partial (${stuckCount})`}
+            </button>
+          )}
           <DriveSyncControl onSynced={() => utils.search.query.invalidate()} />
           <button
             onClick={() => setShowUpload(true)}

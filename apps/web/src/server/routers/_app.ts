@@ -4,6 +4,7 @@ import {
 } from "@research-repo/core";
 import { z } from "zod";
 import { prisma } from "@research-repo/db";
+import { findUnfinishedSourceIds } from "@research-repo/pipeline";
 import { createSource, deleteSource, presignUploads } from "../sources.service";
 import { enqueuePipeline } from "../queue";
 import { router, publicProcedure } from "./trpc";
@@ -90,6 +91,15 @@ export const sourcesRouter = router({
       await enqueuePipeline(input.id);
       return { ok: true };
     }),
+
+  // Re-run the pipeline for every failed/partial source (no attempt cap — this
+  // is an explicit user action). Idempotent stages embed/tag/extract whatever's
+  // still missing.
+  reprocessUnfinished: publicProcedure.mutation(async () => {
+    const ids = await findUnfinishedSourceIds();
+    for (const id of ids) await enqueuePipeline(id);
+    return { queued: ids.length };
+  }),
 
   // Remove a source and everything derived from it.
   delete: publicProcedure
